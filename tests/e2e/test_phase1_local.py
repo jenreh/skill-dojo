@@ -208,3 +208,22 @@ def test_layout_and_branding(curated: Context) -> None:
     assert interface["displayName"] == "Hello"
     assert errors(curated) == []
     assert build(curated, check=True).changed == []
+
+
+def test_build_refuses_symlinked_manifest_folder(curated: Context) -> None:
+    add_plugin(curated.repo)
+    target = curated.repo / ".github"
+    (curated.repo / "plugins/hello/.claude-plugin").symlink_to(target)
+    with pytest.raises(InvalidInputError, match="symlink"):
+        local_add(curated, "plugins/hello")
+    assert not (target / "plugin.json").exists()
+
+
+def test_branding_icon_must_stay_in_repo(curated: Context, tmp_path: Path) -> None:
+    secret = tmp_path / "secret.svg"
+    secret.write_text("secret")
+    config = registry_path(curated.repo, "config.yaml")
+    config.write_text(config.read_text() + f"branding:\n  icon: {secret}\n")
+    add_plugin(curated.repo)
+    with pytest.raises(InvalidInputError, match="outside the repo"):
+        local_add(curated, "plugins/hello")

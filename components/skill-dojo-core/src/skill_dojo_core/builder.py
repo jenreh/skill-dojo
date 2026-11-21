@@ -265,6 +265,11 @@ class PluginBuild:
         if branding is None or branding.icon is None:
             return
         icon = self.reg.repo / branding.icon
+        repo = self.reg.repo.resolve()
+        if repo not in icon.resolve().parents:
+            raise InvalidInputError(
+                f"branding icon {branding.icon} is outside the repo"
+            )
         if not icon.is_file():
             raise InvalidInputError(f"branding icon {branding.icon} not found")
         full = self.rel(path)
@@ -290,7 +295,7 @@ class PluginBuild:
 
     def skill_names(self) -> list[str]:
         root = self.reg.repo / self.base / "skills"
-        if not root.is_dir():
+        if root.is_symlink() or not root.is_dir():
             return []
         return sorted(
             p.name

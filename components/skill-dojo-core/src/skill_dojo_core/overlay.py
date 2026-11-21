@@ -10,7 +10,26 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from skill_dojo_core.errors import InvalidInputError
+
 log = logging.getLogger(__name__)
+
+
+def check_contained(repo: Path, rel: str) -> Path:
+    """``repo / rel``, refusing ``..`` and symlinked parent directories.
+
+    Generated files must never be written or read through a link that leaves
+    the plugin (e.g. a ``.claude-plugin`` folder linked to ``.github/workflows``).
+    """
+    parts = PurePosixPath(rel).parts
+    if not parts or PurePosixPath(rel).is_absolute() or ".." in parts:
+        raise InvalidInputError(f"{rel}: path leaves the repository")
+    current = repo
+    for part in parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            raise InvalidInputError(f"{rel}: parent folder {part} is a symlink")
+    return repo / rel
 
 
 @dataclass(frozen=True)
@@ -27,7 +46,7 @@ class Overlay:
     pending: dict[str, Entry] = field(default_factory=dict)
 
     def _disk(self, rel: str) -> Entry:
-        path = self.repo / rel
+        path = check_contained(self.repo, rel)
         if path.is_symlink():
             return Link(str(path.readlink()))
         if path.is_file():
@@ -83,7 +102,7 @@ class Overlay:
 
     def apply(self) -> None:
         for rel, entry in sorted(self.pending.items()):
-            path = self.repo / rel
+            path = check_contained(self.repo, rel)
             if path.is_symlink() or path.is_file():
                 path.unlink()
             elif path.is_dir() and entry is not None:
