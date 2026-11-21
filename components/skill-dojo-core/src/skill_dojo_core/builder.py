@@ -431,6 +431,7 @@ def plan(reg: Registry) -> Overlay:
     overlay.write(
         workflows.VALIDATE_WORKFLOW, workflows.validate_workflow(reg.config.tool)
     )
+    overlay.write(workflows.SYNC_WORKFLOW, workflows.sync_workflow(reg.config.tool))
     overlay.write(f"{REGISTRY_DIR}/{LOCK}", render_lock(reg.lock))
     return overlay
 
