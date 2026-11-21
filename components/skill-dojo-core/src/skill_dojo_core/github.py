@@ -105,12 +105,9 @@ class GhCli:
             self.run(
                 "pr",
                 "list",
-                "--head",
-                head,
-                "--base",
-                base,
-                "--state",
-                "open",
+                f"--head={head}",
+                f"--base={base}",
+                "--state=open",
                 "--json",
                 PR_FIELDS,
                 "--limit",
@@ -127,14 +124,10 @@ class GhCli:
             self.run(
                 "pr",
                 "create",
-                "--head",
-                head,
-                "--base",
-                base,
-                "--title",
-                title,
-                "--body",
-                body,
+                f"--head={head}",
+                f"--base={base}",
+                f"--title={title}",
+                f"--body={body}",
             )
             .strip()
             .splitlines()[-1]
@@ -142,8 +135,8 @@ class GhCli:
         return self.view(url)
 
     def update_pull_request(self, number: int, title: str, body: str) -> PullRequest:
-        self.run("pr", "edit", str(number), "--title", title, "--body", body)
+        self.run("pr", "edit", str(number), f"--title={title}", f"--body={body}")
         return self.view(str(number))
 
     def comment(self, number: int, body: str) -> None:
-        self.run("pr", "comment", str(number), "--body", body)
+        self.run("pr", "comment", str(number), f"--body={body}")

@@ -145,6 +145,11 @@ def fetch_plugin(ctx: Context, source: Source, name: str, tmp: Path) -> Fetched:
     if plugin.repository == source.repository:
         return Fetched(tmp / "src", plugin, source.repository, source.ref, commit)
     url = sources.repo_url(plugin.repository)
+    local_source = sources.repo_url(source.repository).startswith("file://")
+    if url.startswith("file://") and not local_source:
+        raise InvalidInputError(
+            f"'{name}' points at a local repository; only a local source may"
+        )
     ref = plugin.ref or "HEAD"
     remote_commit = git.resolve(url, ref, ctx.repo)
     git.fetch_commit(url, remote_commit, tmp / "plugin")
@@ -158,6 +163,14 @@ def upstream_files(fetched: Fetched) -> dict[str, Path]:
         if fetched.plugin.path == "."
         else fetched.root / fetched.plugin.path
     )
+    root = fetched.root.resolve()
+    current = fetched.root
+    for part in PurePosixPath(fetched.plugin.path).parts:
+        current = current / part
+        if current.is_symlink():
+            raise InvalidInputError(f"upstream path {fetched.plugin.path} is a symlink")
+    if base.resolve() != root and root not in base.resolve().parents:
+        raise InvalidInputError(f"upstream path {fetched.plugin.path} leaves the repo")
     if not base.is_dir():
         raise NotFoundError(f"{fetched.plugin.path} not found upstream")
     files = {}
@@ -333,8 +346,14 @@ def make_candidate(
                 wt, item_id, source, fetched, approved, candidate, flags, old
             )
             git.run(wt, "add", "-A")
+            # --no-verify: local hooks never run on untrusted upstream content.
             git.run(
-                wt, "commit", "-q", "-m", f"candidate: {item_id} {fetched.commit[:12]}"
+                wt,
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                f"candidate: {item_id} {fetched.commit[:12]}",
             )
             git.run(wt, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{branch}")
     title = f"candidate: {item_id} @ {fetched.commit[:12]}"

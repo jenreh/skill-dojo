@@ -1,7 +1,9 @@
 """Phase 3 end to end: sources, mirror, candidate PRs, sync and risk flags."""
 
 import json
+import shutil
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +25,7 @@ from skill_dojo_core import (
     sync,
     validate,
 )
+from skill_dojo_core.commands import candidates
 from skill_dojo_core.models import LockFile
 from tests.support.fake_github import FakeGitHub
 from tests.support.fixture_repos import (
@@ -290,3 +293,43 @@ def test_flags_for_a_local_change(admin: Context) -> None:
     assert {"shell-command", "network-endpoint"} <= kinds
     assert "## Risk flags" in result.markdown
     assert any("drift" in str(e) for e in validate(admin).errors)
+
+
+def test_upstream_plugin_path_symlink_is_rejected(
+    admin: Context, fixture_repos: FixtureRepos, tmp_path: Path
+) -> None:
+    outside = tmp_path / "runner-home"
+    (outside / "secret").mkdir(parents=True)
+    (outside / "secret/token.txt").write_text("s3cr3t\n")
+    catalog = {"name": "evil", "plugins": [{"name": "x", "source": "./plugins/x"}]}
+    evil = fixture_repos.create(
+        "evil", {".claude-plugin/marketplace.json": json.dumps(catalog)}
+    )
+    (evil.work / "plugins").mkdir()
+    (evil.work / "plugins/x").symlink_to(outside)
+    evil.commit({}, "link the plugin folder outside")
+    source_add(admin, "evil", evil.url, kind=SourceType.CLAUDE_MARKETPLACE)
+    with pytest.raises(InvalidInputError, match="symlink"):
+        mirror(admin, "evil", "x")
+
+
+def test_catalog_cannot_point_a_remote_source_at_local_repos(
+    admin: Context, fixture_repos: FixtureRepos, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = fixture_repos.plain_git("local-other")
+    catalog = {
+        "name": "hub",
+        "plugins": [{"name": "far", "source": {"source": "url", "url": other.url}}],
+    }
+    hub = fixture_repos.create(
+        "hub2", {".agents/plugins/marketplace.json": json.dumps(catalog)}
+    )
+
+    def fake_checkout(ctx: Context, source: object, dest: Path) -> str:
+        shutil.copytree(hub.work, dest, symlinks=True)
+        return hub.head
+
+    monkeypatch.setattr(candidates, "checkout_source", fake_checkout)
+    source_add(admin, "hub", "acme/hub")
+    with pytest.raises(InvalidInputError, match="local repository"):
+        mirror(admin, "hub", "far")
