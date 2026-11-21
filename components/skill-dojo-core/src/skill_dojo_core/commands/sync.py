@@ -1,6 +1,6 @@
 """``sync``: a candidate PR for every mirror and bundle whose upstream moved."""
 
-from skill_dojo_core.branches import base_branch, remote_start
+from skill_dojo_core.branches import QUARANTINE, base_branch, remote_start
 from skill_dojo_core.commands.bundles import refresh_bundle
 from skill_dojo_core.commands.candidates import CandidateResult, make_candidate
 from skill_dojo_core.context import Context
@@ -26,8 +26,16 @@ def sync(ctx: Context, *, item: str | None = None) -> SyncResult:
         if item not in tracked:
             raise NotFoundError(f"no mirror or bundle '{item}' on {base}")
         tracked = {item: tracked[item]}
+    # A quarantine waiting in its own PR already stops new candidates.
+    waiting = {
+        pr.head.removeprefix(QUARANTINE)
+        for pr in ctx.github.list_open_pull_requests(base)
+        if pr.head.startswith(QUARANTINE)
+    }
     results = [
-        make_candidate(ctx, None, None, i, new=False)
+        CandidateResult(item=i, commit="", branch="", status="quarantined")
+        if i in waiting
+        else make_candidate(ctx, None, None, i, new=False)
         if kind is ItemKind.MIRROR
         else refresh_bundle(ctx, i)
         for i, kind in tracked.items()

@@ -13,11 +13,10 @@ from skill_dojo_core.branches import (
     base_branch,
     commit_and_push,
     main_branch,
+    open_or_update,
     remote_start,
     view,
 )
-from skill_dojo_core.commands.promote import manifest_version
-from skill_dojo_core.commands.vendor import REF_RE
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import (
     ConflictError,
@@ -26,8 +25,9 @@ from skill_dojo_core.errors import (
     ValidationFailedError,
 )
 from skill_dojo_core.github import PullRequest
-from skill_dojo_core.models import Client, ItemsFile, LockFile
-from skill_dojo_core.registry import ITEMS, LOCK, Registry, model_at
+from skill_dojo_core.models import ApprovalsFile, Client, ItemsFile, LockFile
+from skill_dojo_core.registry import APPROVALS, ITEMS, LOCK, Registry, model_at
+from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
 from skill_dojo_core.validation import validate_registry
 
@@ -68,14 +68,24 @@ def _check_valid(wt: Path, what: str) -> None:
         raise ValidationFailedError(f"{what} does not validate: " + "; ".join(errors))
 
 
-def _versions(repo: Path, ref: str | None) -> dict[str, str]:
+def _versions(repo: Path, ref: str | None) -> dict[str, tuple[str, str]]:
+    """item -> (version or short digest, treeSha256) at ``ref``."""
     if ref is None:
         return {}
     lock = model_at(repo, ref, LOCK, LockFile)
     return {
-        item_id: manifest_version(repo, ref, item_id) or entry.tree_sha256[:12]
+        item_id: (
+            builder.manifest_version_at(repo, ref, item_id) or entry.tree_sha256[:12],
+            entry.tree_sha256,
+        )
         for item_id, entry in lock.items.items()
     }
+
+
+def _update(old: tuple[str, str], new: tuple[str, str]) -> str:
+    if old[0] != new[0]:
+        return f"{old[0]} -> {new[0]}"
+    return f"{new[0]} (content {old[1][:12]} -> {new[1][:12]})"
 
 
 def release_notes(repo: Path, previous: str | None, commit: str, tag: str) -> str:
@@ -83,11 +93,11 @@ def release_notes(repo: Path, previous: str | None, commit: str, tag: str) -> st
     lines = [f"Marketplace release {tag}", ""]
     lines.append(f"Changes since {previous}:" if previous else "First release.")
     sections = {
-        "Added": [f"- {i} {new[i]}" for i in sorted(set(new) - set(old))],
+        "Added": [f"- {i} {new[i][0]}" for i in sorted(set(new) - set(old))],
         "Updated": [
-            f"- {i} {old[i]} -> {new[i]}"
+            f"- {i} {_update(old[i], new[i])}"
             for i in sorted(set(new) & set(old))
-            if old[i] != new[i]
+            if old[i][1] != new[i][1]
         ],
         "Removed": [f"- {i}" for i in sorted(set(old) - set(new))],
     }
@@ -131,10 +141,12 @@ def release(ctx: Context) -> ReleaseResult:
         )
     with view(ctx.repo, start) as wt:
         _check_valid(wt, main)
-    tag = _next_tag(ctx.repo, f"{ctx.now:%Y.%m.%d}")
-    notes = release_notes(ctx.repo, previous, commit, tag)
-    git.run(ctx.repo, "tag", "-a", tag, "-m", notes, commit)
-    git.run(ctx.repo, "push", "-q", "origin", f"refs/tags/{tag}")
+    with repo_lock(ctx.repo):
+        tag = _next_tag(ctx.repo, f"{ctx.now:%Y.%m.%d}")
+        notes = release_notes(ctx.repo, previous, commit, tag)
+        git.run(ctx.repo, "tag", "-a", tag, "-m", notes, commit)
+        # If another run pushed this tag first, the push fails and nothing moves.
+        git.run(ctx.repo, "push", "-q", "origin", f"refs/tags/{tag}")
     ctx.report(f"Released {tag}")
     log.info("Released %s at %s", tag, commit)
     return ReleaseResult(
@@ -161,7 +173,7 @@ def affected(
     """Clients whose ref holds the item in a content other than ``kept``."""
     hit, unknown = [], []
     for client in clients:
-        commit = _resolve(repo, client.ref) if REF_RE.match(client.ref) else None
+        commit = _resolve(repo, client.ref) if git.is_ref(client.ref) else None
         if commit is None:
             unknown.append(client)
             continue
@@ -195,13 +207,6 @@ def _remove(reg: Registry, wt: Path, item_id: str) -> None:
     reg.lock.items.pop(item_id, None)
 
 
-def _open(ctx: Context, head: str, base: str, title: str, body: str) -> PullRequest:
-    found = ctx.github.find_open_pull_request(head, base)
-    if found is not None:
-        return ctx.github.update_pull_request(found.number, title, body)
-    return ctx.github.open_pull_request(head, base, title, body)
-
-
 def _revoke_body(
     item_id: str, action: str, reason: str, hit: list[Client], unknown: list[Client]
 ) -> str:
@@ -215,22 +220,61 @@ def _revoke_body(
     return "\n".join(lines)
 
 
+def last_approved(repo: Path, main: str, item_id: str) -> str:
+    """The newest release older than main's content of ``item_id`` whose
+    content of it has an approval in main's ``approvals.yaml``."""
+    current = model_at(repo, main, LOCK, LockFile).items.get(item_id)
+    approvals = model_at(repo, main, APPROVALS, ApprovalsFile)
+    tags = git.run(
+        repo,
+        "tag",
+        "--list",
+        f"{TAG_PREFIX}*",
+        "--sort=-creatordate",
+        f"--merged={main}",
+    ).splitlines()
+    trees = []
+    for tag in tags:
+        entry = model_at(repo, tag, LOCK, LockFile).items.get(item_id)
+        trees.append(entry.tree_sha256 if entry else None)
+    now = current.tree_sha256 if current else None
+    # Only releases from before the current content was first released.
+    older = max((i for i, t in enumerate(trees) if t == now), default=-1) + 1
+    for tag, tree in list(zip(tags, trees, strict=True))[older:]:
+        if tree and tree != now and approvals.for_digest(item_id, tree):
+            return git.run(repo, "rev-parse", f"{tag}^{{commit}}")
+    raise NotFoundError(f"no earlier approved release of '{item_id}' to roll back to")
+
+
+def _target(
+    ctx: Context, main: str, item_id: str, to: str | None, rollback: bool
+) -> str | None:
+    if to is not None:
+        target = _resolve(ctx.repo, to) if git.is_ref(to) else None
+        if target is None:
+            raise InvalidInputError(f"'{to}' is not a tag, branch or commit")
+        return target
+    return last_approved(ctx.repo, main, item_id) if rollback else None
+
+
 def revoke(
-    ctx: Context, item_id: str, *, to: str | None = None, reason: str = ""
+    ctx: Context,
+    item_id: str,
+    *,
+    to: str | None = None,
+    rollback: bool = False,
+    reason: str = "",
 ) -> RevokeResult:
-    """Hotfix PR into main that removes the item (or rolls it back to ``to``),
-    plus a back-merge PR of the same branch into staging."""
+    """Hotfix PR into main that removes the item, or rolls it back (to ``to``, or
+    with ``rollback`` to its last approved release), plus a back-merge PR of the
+    same branch into staging."""
     admin = Registry.load(ctx.repo)
     main, base = main_branch(admin), base_branch(admin)
     start = remote_start(ctx.repo, main)
     _fetch_tags(ctx.repo)
-    target = None
-    if to is not None:
-        target = _resolve(ctx.repo, to) if REF_RE.match(to) and ".." not in to else None
-        if target is None:
-            raise InvalidInputError(f"'{to}' is not a tag, branch or commit")
+    target = _target(ctx, start, item_id, to, rollback)
     branch = f"revoke/{item_id}"
-    with view(ctx.repo, start) as wt:
+    with repo_lock(ctx.repo), view(ctx.repo, start) as wt:
         reg = Registry.load(wt)
         if reg.items.get(item_id) is None:
             raise NotFoundError(f"no item '{item_id}' on {main}")
@@ -245,8 +289,8 @@ def revoke(
         commit_and_push(wt, branch, f"fix: revoke {item_id} ({action})")
     hit, unknown = affected(ctx.repo, admin.clients.clients, item_id, kept)
     body = _revoke_body(item_id, action, reason, hit, unknown)
-    pr = _open(ctx, branch, main, f"revoke: {item_id}", body)
-    back = _open(
+    pr, _ = open_or_update(ctx, branch, main, f"revoke: {item_id}", body)
+    back, _ = open_or_update(
         ctx,
         branch,
         base,

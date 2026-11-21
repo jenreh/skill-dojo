@@ -39,16 +39,23 @@ def review_show(number: int) -> None:
     """Show a candidate's changed files, risk flags and notes."""
     result = core.review_show(build_context(Path.cwd()), number)
     pr = result.pull_request
-    typer.echo(f"#{pr.number} {pr.title} ({pr.head} -> {pr.base})\n{pr.url}\n")
+    typer.echo(f"#{pr.number} {pr.title} ({pr.head} -> {pr.base})\n{pr.url}")
+    typer.echo(f"Head {pr.head_oid or '?'} (pass it to 'review approve --head')\n")
     typer.echo("Changed files:")
     echo_lines(result.files)
     typer.echo(f"\n{pr.body}")
 
 
 @review_app.command("approve")
-def review_approve(number: int) -> None:
+def review_approve(
+    number: int,
+    head: Annotated[
+        str | None, typer.Option(help="Merge only if the PR is still at this commit.")
+    ] = None,
+) -> None:
     """Approve and merge a candidate PR (or report that it waits)."""
-    echo_action(core.review_approve(build_context(Path.cwd(), need_actor=True), number))
+    ctx = build_context(Path.cwd(), need_actor=True)
+    echo_action(core.review_approve(ctx, number, head=head))
 
 
 @review_app.command("reject")

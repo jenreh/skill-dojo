@@ -9,12 +9,13 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from skill_dojo_core import (
     catalogs,
     frontmatter,
+    git,
     hashing,
     jsontext,
     metadata,
@@ -47,6 +48,39 @@ PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 def plugin_dir(item_id: str) -> str:
     return f"{PLUGINS_DIR}/{item_id}"
+
+
+def version_of(data: bytes | str | None) -> str | None:
+    """``version`` of a manifest's JSON text, if it is a string."""
+    if data is None:
+        return None
+    try:
+        parsed = json.loads(data)
+    except ValueError:
+        return None
+    version = parsed.get("version") if isinstance(parsed, dict) else None
+    return version if isinstance(version, str) else None
+
+
+def manifest_version(root: Path) -> str | None:
+    """Version of the plugin in folder ``root``."""
+    for rel in (ROOT_MANIFEST, CLAUDE_MANIFEST):
+        try:
+            version = version_of((root / rel).read_bytes())
+        except OSError:
+            continue
+        if version:
+            return version
+    return None
+
+
+def manifest_version_at(repo: Path, ref: str, item_id: str) -> str | None:
+    """Version of plugin ``item_id`` as it is at ``ref``."""
+    for rel in (ROOT_MANIFEST, CLAUDE_MANIFEST):
+        version = version_of(git.show_file(repo, ref, f"{plugin_dir(item_id)}/{rel}"))
+        if version:
+            return version
+    return None
 
 
 def is_generated(rel: str, lock: ItemLock | None) -> bool:
@@ -90,9 +124,10 @@ def provenance(  # noqa: PLR0917
         (p for p in lock.parts if skill and p.kind == "skill" and p.name == skill),
         None,
     )
+    license_ = manifest.get("license")
     if part is not None:
         upstream, source_path = part.upstream, part.path
-    license_ = manifest.get("license")
+        license_ = upstream.license
     return metadata.Provenance(
         registry_id=registry_id(config, item),
         kind=item.kind.value,

@@ -12,6 +12,7 @@ calls before a merge add up instead of replacing each other.
 
 import json
 import logging
+import os
 import posixpath
 import re
 import shutil
@@ -21,7 +22,13 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from skill_dojo_core import builder, git, hashing, jsontext, risk
-from skill_dojo_core.branches import base_branch, commit_and_push, remote_start, view
+from skill_dojo_core.branches import (
+    base_branch,
+    candidate_branch,
+    commit_and_push,
+    remote_start,
+    view,
+)
 from skill_dojo_core.commands.candidates import (
     LICENSE_NAMES,
     MARKER,
@@ -35,7 +42,6 @@ from skill_dojo_core.commands.candidates import (
     upstream_files,
 )
 from skill_dojo_core.commands.sources import LOCAL_SOURCE
-from skill_dojo_core.commands.vendor import REF_RE
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
 from skill_dojo_core.models import (
@@ -58,6 +64,7 @@ from skill_dojo_core.registry import (
     model_at,
     save_yaml_model,
 )
+from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.risk import RiskFlag
 from skill_dojo_core.validation import validate_registry
 
@@ -136,6 +143,21 @@ def _servers(files: dict[str, Path]) -> tuple[str, dict[str, Any]]:
     return "", {}
 
 
+def _license(files: dict[str, Path]) -> str | None:
+    """The ``license`` a plugin's manifest declares."""
+    for rel in (builder.ROOT_MANIFEST, builder.CLAUDE_MANIFEST):
+        if rel not in files:
+            continue
+        try:
+            data = json.loads(files[rel].read_text(encoding="utf-8"))
+        except OSError, UnicodeDecodeError, ValueError:
+            continue
+        value = data.get("license") if isinstance(data, dict) else None
+        if isinstance(value, str):
+            return value
+    return None
+
+
 def pick(spec: PartSpec, files: dict[str, Path], upstream: Upstream) -> Picked:
     """The files (or MCP server) of one part out of a plugin's files."""
     base = upstream.path
@@ -168,6 +190,17 @@ def pick(spec: PartSpec, files: dict[str, Path], upstream: Upstream) -> Picked:
         if src.is_symlink():
             raise InvalidInputError(f"part {spec.name}: {rel} is a symlink")
     return Picked(spec, upstream, posixpath.normpath(path), chosen, None, licenses)
+
+
+def check_no_links(root: Path) -> None:
+    """Bundle folders are written and deleted in place: no symlinked folders."""
+    if root.is_symlink():
+        raise InvalidInputError(f"bundle folder {root.name} is a symlink")
+    for folder, dirs, _ in os.walk(root):
+        for name in dirs:
+            if (Path(folder) / name).is_symlink():
+                rel = (Path(folder) / name).relative_to(root)
+                raise InvalidInputError(f"bundle folder {rel} is a symlink")
 
 
 def license_dir(spec: PartSpec) -> str:
@@ -270,14 +303,16 @@ class Fetcher:
         fetched = fetch_plugin(
             self.ctx, source, plugin, self.tmp / f"{len(self.cache)}-{source_id}"
         )
+        files = upstream_files(fetched)
         upstream = Upstream(
             repository=fetched.repository,
             commit=fetched.commit,
             path=fetched.plugin.path,
             ref=fetched.ref,
             plugin=fetched.plugin.name,
+            license=_license(files),
         )
-        return upstream_files(fetched), upstream
+        return files, upstream
 
     def _local(self, plugin: str) -> tuple[dict[str, Path], Upstream]:
         reg = Registry.load(self.wt)
@@ -293,6 +328,7 @@ class Fetcher:
             commit=git.head(self.wt),
             path=builder.plugin_dir(plugin),
             plugin=plugin,
+            license=_license(files),
         )
         return files, upstream
 
@@ -306,15 +342,9 @@ class Fetcher:
 def _pending(ctx: Context, item_id: str, base: str) -> str | None:
     """``origin/<head>`` of the open candidate PR of ``item_id``, if any."""
     for pr in ctx.github.list_open_pull_requests(base):
-        if pr.head.startswith(f"candidate/{item_id}/") and REF_RE.match(pr.head):
-            git.run(
-                ctx.repo,
-                "fetch",
-                "-q",
-                "origin",
-                f"+refs/heads/{pr.head}:refs/remotes/origin/{pr.head}",
-            )
-            return f"origin/{pr.head}"
+        own = not pr.cross_repository and git.is_ref(pr.head)
+        if own and pr.head.startswith(candidate_branch(item_id, "")):
+            return git.fetch_branch(ctx.repo, pr.head)
     return None
 
 
@@ -361,16 +391,6 @@ def _set_version(root: Path, version: str) -> None:
     path.write_text(jsontext.dump(data), encoding="utf-8")
 
 
-def _staged_version(repo: Path, staging: str, item_id: str) -> str | None:
-    data = git.show_file(
-        repo, staging, f"{builder.plugin_dir(item_id)}/{builder.ROOT_MANIFEST}"
-    )
-    if data is None:
-        return None
-    version = json.loads(data).get("version")
-    return version if isinstance(version, str) else None
-
-
 def _part_lock(picked: Picked) -> PartLock:
     return PartLock(
         kind=picked.spec.kind,
@@ -380,7 +400,14 @@ def _part_lock(picked: Picked) -> PartLock:
     )
 
 
-def _body(item: Item, version: str, flags: list[RiskFlag], **info: Any) -> str:
+def _body(  # noqa: PLR0917
+    item: Item,
+    version: str,
+    flags: list[RiskFlag],
+    changes: dict[str, list[str]],
+    errors: list[str],
+    tree: str,
+) -> str:
     lines = [f"## Candidate: `{item.id}` (bundle {version})", "", "### Parts", ""]
     for part in item.parts:
         where = f"{part.source}:{part.upstream_plugin}"
@@ -390,15 +417,14 @@ def _body(item: Item, version: str, flags: list[RiskFlag], **info: Any) -> str:
     if not item.parts:
         lines.append("- no parts yet")
     lines += ["", "### Changed files", ""]
-    changes = info["changes"]
     for kind in ("added", "changed", "removed"):
         if changes[kind]:
             shown = ", ".join(f"`{p}`" for p in changes[kind][:40])
             lines.append(f"- {kind} ({len(changes[kind])}): {shown}")
     lines += ["", "### Risk flags", "", risk.render(flags), ""]
-    if info["errors"]:
-        lines += ["### Validation errors", "", *(f"- {e}" for e in info["errors"]), ""]
-    lines.append(f"{MARKER} item={item.id} tree={info['tree']} -->")
+    if errors:
+        lines += ["### Validation errors", "", *(f"- {e}" for e in errors), ""]
+    lines.append(f"{MARKER} item={item.id} tree={tree} -->")
     return "\n".join(lines)
 
 
@@ -528,6 +554,11 @@ def _review(
 
 def bundle_candidate(ctx: Context, item_id: str, change: Change) -> CandidateResult:
     check_item_id(item_id)
+    with repo_lock(ctx.repo):
+        return _bundle_candidate(ctx, item_id, change)
+
+
+def _bundle_candidate(ctx: Context, item_id: str, change: Change) -> CandidateResult:
     admin = Registry.load(ctx.repo)
     base = base_branch(admin)
     staging = remote_start(ctx.repo, base)
@@ -545,6 +576,7 @@ def bundle_candidate(ctx: Context, item_id: str, change: Change) -> CandidateRes
             return CandidateResult(
                 item=item_id, commit="", branch="", status="quarantined"
             )
+        check_no_links(root)
         old = reg.lock.items.get(item_id)
         for rel in old.generated if old else []:
             (root / rel).unlink(missing_ok=True)
@@ -557,11 +589,13 @@ def bundle_candidate(ctx: Context, item_id: str, change: Change) -> CandidateRes
                 return CandidateResult(
                     item=item_id, commit="", branch="", status="up-to-date"
                 )
-            version = bump_patch(_staged_version(ctx.repo, staging, item_id))
+            version = bump_patch(
+                builder.manifest_version_at(ctx.repo, staging, item_id)
+            )
             _set_version(root, version)
             _record(reg, item, picked, sources, version, base)
         lock, flags, body = _review(ctx.repo, staging, wt, item, version)
-        branch = f"candidate/{item_id}/{lock.tree_sha256[:12]}"
+        branch = candidate_branch(item_id, lock.tree_sha256)
         commit_and_push(wt, branch, f"candidate: bundle {item_id} {version}")
     title = f"candidate: bundle {item_id} {version}"
     pr, status = publish(ctx, item_id, branch=branch, base=base, title=title, body=body)

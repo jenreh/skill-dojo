@@ -18,7 +18,6 @@ from skill_dojo_core.results import Result
 log = logging.getLogger(__name__)
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 # Only plain transports: no ext::, fd:: or other remote helpers that run commands.
 URL_RE = re.compile(r"^(?:https://|ssh://|file://|git@[A-Za-z0-9.-]+:)[^\s]+$")
 
@@ -57,8 +56,7 @@ def vendor(
     name = name or default_name(url)
     if not NAME_RE.match(name):
         raise InvalidInputError(f"'{name}' is not a valid folder name")
-    if not REF_RE.match(ref) or ".." in ref:
-        raise InvalidInputError(f"'{ref}' is not a valid git ref")
+    git.check_ref(ref)
     repo = ctx.repo
     prefix = f".agents/{name}"
     # A consumer repo has no registry/; git's own index lock guards it.

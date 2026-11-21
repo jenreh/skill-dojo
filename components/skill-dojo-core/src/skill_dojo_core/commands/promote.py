@@ -9,13 +9,21 @@ Build then stamps ``approved-by``/``approved-at``/``reviewEvidence`` into every
 item whose content matches an approval.
 """
 
-import json
 import logging
+import re
 from pathlib import Path
 
 from skill_dojo_core import builder, git
-from skill_dojo_core.branches import base_branch, main_branch, remote_start, view
-from skill_dojo_core.commands.review import candidate_item
+from skill_dojo_core.branches import (
+    base_branch,
+    candidate_item,
+    commit,
+    main_branch,
+    open_or_update,
+    push,
+    remote_start,
+    view,
+)
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, PolicyError, ValidationFailedError
 from skill_dojo_core.github import PullRequest
@@ -24,22 +32,27 @@ from skill_dojo_core.models import (
     ApprovalsFile,
     Channel,
     ItemKind,
+    ItemsFile,
     LockFile,
     RiskTier,
 )
 from skill_dojo_core.registry import (
     APPROVALS,
+    ITEMS,
     LOCK,
     Registry,
     model_at,
     save_yaml_model,
 )
+from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
 from skill_dojo_core.validation import validate_registry
 
 log = logging.getLogger(__name__)
 
 MARKER = "<!-- skill-dojo:promote -->"
+# A row of the risk-flag table in a candidate PR body (risk.render).
+FLAG_ROW = re.compile(r"^\| `[a-z0-9-]+` \|", re.MULTILINE)
 
 
 class PolicyBlock(Result):
@@ -55,24 +68,10 @@ class PromoteResult(Result):
     items: list[str] = []
 
 
-def manifest_version(repo: Path, ref: str, item_id: str) -> str | None:
-    for rel in (builder.ROOT_MANIFEST, builder.CLAUDE_MANIFEST):
-        data = git.show_file(repo, ref, f"{builder.plugin_dir(item_id)}/{rel}")
-        if data is None:
-            continue
-        try:
-            version = json.loads(data).get("version")
-        except ValueError, AttributeError:
-            continue
-        if isinstance(version, str):
-            return version
-    return None
-
-
 def approval_of(ctx: Context, pr: PullRequest, staging: str) -> Approval | None:
     """The approval a merged candidate PR stands for, read from git and GitHub."""
     item_id = candidate_item(pr.head)
-    if item_id is None or not pr.merge_commit:
+    if item_id is None or not pr.merge_commit or pr.cross_repository:
         return None
     if not git.is_ancestor(ctx.repo, pr.merge_commit, staging):
         log.info("PR %d is not on %s (reverted or squashed away)", pr.number, staging)
@@ -80,20 +79,30 @@ def approval_of(ctx: Context, pr: PullRequest, staging: str) -> Approval | None:
     lock = model_at(ctx.repo, pr.merge_commit, LOCK, LockFile).items.get(item_id)
     if lock is None:
         return None
-    reviews = [r for r in ctx.github.reviews(pr.number) if r.state == "APPROVED"]
+    # Only approvals of the final head count; GitHub keeps older ones unless
+    # stale approvals are dismissed.
+    reviews = [
+        r
+        for r in ctx.github.reviews(pr.number)
+        if r.state == "APPROVED" and (r.commit is None or r.commit == pr.head_oid)
+    ]
     people = {r.user for r in reviews if r.user}
     if pr.merged_by:
         people.add(pr.merged_by)
+    # The author only counts when nobody else approved or merged: merging one's
+    # own candidate is the approval in a one-person repo, but never a second vote.
+    independent = people - {pr.author}
     times = [t for t in (*(r.submitted_at for r in reviews), pr.merged_at) if t]
     return Approval(
         item=item_id,
-        version=manifest_version(ctx.repo, pr.merge_commit, item_id),
+        version=builder.manifest_version_at(ctx.repo, pr.merge_commit, item_id),
         commit=lock.upstream.commit,
         digest=lock.tree_sha256,
         pull_request=pr.url,
-        reviewers=sorted(people),
+        reviewers=sorted(independent or people),
         approved_at=max(times) if times else ctx.now.isoformat(),
         channel=Channel.BETA,
+        risk_flags=len(FLAG_ROW.findall(pr.body)),
     )
 
 
@@ -110,11 +119,25 @@ def collect_approvals(
     return sorted(found, key=lambda a: a.approved_at)
 
 
-def check_policy(reg: Registry, main_lock: LockFile) -> list[PolicyBlock]:
+def check_policy(
+    reg: Registry, main_lock: LockFile, main_items: ItemsFile
+) -> list[PolicyBlock]:
     """What keeps staging out of main (``channel-policy.yaml``)."""
     blocks = []
     policy = reg.policy
     for item in reg.items.items:
+        on_main_item = main_items.get(item.id)
+        if (
+            on_main_item is not None
+            and on_main_item.quarantined
+            and not item.quarantined
+        ):
+            blocks.append(
+                PolicyBlock(
+                    item=item.id,
+                    reason="quarantined on main; merge its back-merge PR into staging",
+                )
+            )
         tier = item.risk_tier or policy.default_risk_tier
         if tier is RiskTier.FORBIDDEN:
             blocks.append(PolicyBlock(item=item.id, reason="risk tier is forbidden"))
@@ -197,6 +220,11 @@ def _changed_items(reg: Registry, main_lock: LockFile) -> list[str]:
 
 def promote(ctx: Context) -> PromoteResult:
     """Open or update the promote PR; raises ``PolicyError`` when blocked."""
+    with repo_lock(ctx.repo):
+        return _promote(ctx)
+
+
+def _promote(ctx: Context) -> PromoteResult:
     admin = Registry.load(ctx.repo)
     base, main = base_branch(admin), main_branch(admin)
     staging = remote_start(ctx.repo, base)
@@ -204,18 +232,19 @@ def promote(ctx: Context) -> PromoteResult:
     branch = f"promote/{ctx.now:%Y-%m-%d}"
     main_approvals = model_at(ctx.repo, main_ref, APPROVALS, ApprovalsFile)
     main_lock = model_at(ctx.repo, main_ref, LOCK, LockFile)
+    main_items = model_at(ctx.repo, main_ref, ITEMS, ItemsFile)
     known = {a.pull_request for a in main_approvals.approvals}
     new = collect_approvals(ctx, base, staging, known)
     with view(ctx.repo, staging) as wt:
         _merge_main(wt, main_ref)
         reg = Registry.load(wt)
-        merged = {a.pull_request: a for a in reg.approvals.approvals}
-        merged |= {a.pull_request: a for a in [*main_approvals.approvals, *new]}
+        # Never trust approvals.yaml on staging: only main's and GitHub's.
+        merged = {a.pull_request: a for a in [*main_approvals.approvals, *new]}
         reg.approvals.approvals = sorted(
             merged.values(), key=lambda a: (a.approved_at, a.item)
         )
         save_yaml_model(wt, APPROVALS, reg.approvals)
-        blocks = check_policy(reg, main_lock)
+        blocks = check_policy(reg, main_lock, main_items)
         if blocks:
             raise PolicyError(
                 "promotion blocked: "
@@ -229,22 +258,12 @@ def promote(ctx: Context) -> PromoteResult:
                 + "; ".join(str(e) for e in report.errors[:10])
             )
         items = _changed_items(reg, main_lock)
-        git.run(wt, "add", "-A")
-        if git.run(wt, "status", "--porcelain"):
-            git.run(wt, "commit", "-q", "--no-verify", "-m", "promote: stamp approvals")
-        tree = git.run(wt, "rev-parse", "HEAD^{tree}")
+        tree = commit(wt, "promote: stamp approvals")
         if tree == git.run(wt, "rev-parse", f"{main_ref}^{{tree}}"):
             return PromoteResult(status="up-to-date", branch="")
-        if git.remote_tree(wt, branch) != tree:
-            git.run(wt, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{branch}")
+        push(wt, branch)
     title = f"promote: staging to {main} ({ctx.now:%Y-%m-%d})"
-    body = _body(new, items)
-    open_pr = ctx.github.find_open_pull_request(branch, main)
-    if open_pr is None:
-        pr, status = ctx.github.open_pull_request(branch, main, title, body), "opened"
-    else:
-        pr = ctx.github.update_pull_request(open_pr.number, title, body)
-        status = "updated"
+    pr, status = open_or_update(ctx, branch, main, title, _body(new, items))
     ctx.report(f"{status} promote PR {pr.url}")
     log.info("Promote PR %s: %s", status, pr.url)
     return PromoteResult(

@@ -11,15 +11,21 @@ import subprocess
 from pathlib import Path
 from typing import Any, Protocol
 
+from pydantic import Field
+
 from skill_dojo_core.errors import ExternalToolError
 from skill_dojo_core.results import Result
 
 log = logging.getLogger(__name__)
 
-PR_FIELDS = "number,url,title,body,headRefName,baseRefName,state,author"
+PR_FIELDS = (
+    "number,url,title,body,headRefName,baseRefName,state,author,"
+    "headRefOid,isCrossRepository"
+)
 MERGED_FIELDS = f"{PR_FIELDS},mergedAt,mergeCommit,mergedBy"
 # mergeStateStatus values where a merge waits for something a human must do.
-WAITING = frozenset({"BLOCKED", "BEHIND", "DRAFT", "UNSTABLE", "UNKNOWN"})
+WAITING = frozenset({"BLOCKED", "BEHIND", "DRAFT", "UNSTABLE"})
+MERGED_LIMIT = "1000"
 
 
 class PullRequest(Result):
@@ -31,6 +37,8 @@ class PullRequest(Result):
     base: str
     state: str = "OPEN"
     author: str = ""
+    head_oid: str | None = None
+    cross_repository: bool = False
     merged_at: str | None = None
     merge_commit: str | None = None
     merged_by: str | None = None
@@ -40,6 +48,7 @@ class Review(Result):
     user: str
     state: str  # APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
     submitted_at: str | None = None
+    commit: str | None = Field(default=None, description="Head commit reviewed")
 
 
 class GitHub(Protocol):
@@ -48,7 +57,8 @@ class GitHub(Protocol):
         ...
 
     def find_open_pull_request(self, head: str, base: str) -> PullRequest | None:
-        """The open PR from ``head`` into ``base``, if any."""
+        """The open PR from ``head`` of this repository (never a fork) into
+        ``base``, if any."""
         ...
 
     def open_pull_request(
@@ -79,9 +89,10 @@ class GitHub(Protocol):
         """Submit an approving review."""
         ...
 
-    def merge(self, number: int) -> bool:
-        """Merge with a merge commit. ``False`` when the PR waits for something
-        (branch protection, checks); never bypasses it."""
+    def merge(self, number: int, head_oid: str | None = None) -> bool:
+        """Merge with a merge commit, only while the head is still ``head_oid``.
+        ``False`` when the PR waits for something (branch protection, checks);
+        never bypasses it."""
         ...
 
 
@@ -99,6 +110,8 @@ def _pull_request(data: dict[str, Any]) -> PullRequest:
         base=data.get("baseRefName") or "",
         state=data.get("state") or "OPEN",
         author=_login(data.get("author")) or "",
+        head_oid=data.get("headRefOid"),
+        cross_repository=bool(data.get("isCrossRepository")),
         merged_at=data.get("mergedAt"),
         merge_commit=(data.get("mergeCommit") or {}).get("oid"),
         merged_by=_login(data.get("mergedBy")),
@@ -155,11 +168,13 @@ class GhCli:
                 "--json",
                 PR_FIELDS,
                 "--limit",
-                "1",
+                "20",
             )
             or "[]"
         )
-        return _pull_request(found[0]) if found else None
+        # gh matches the branch name only; a fork may use the same name.
+        own = [p for p in map(_pull_request, found) if not p.cross_repository]
+        return own[0] if own else None
 
     def open_pull_request(
         self, head: str, base: str, title: str, body: str
@@ -195,7 +210,7 @@ class GhCli:
                 "--json",
                 PR_FIELDS,
                 "--limit",
-                "200",
+                MERGED_LIMIT,
             )
             or "[]"
         )
@@ -232,6 +247,7 @@ class GhCli:
                 user=_login(r.get("author")) or "",
                 state=r.get("state") or "",
                 submitted_at=r.get("submittedAt"),
+                commit=(r.get("commit") or {}).get("oid"),
             )
             for r in data.get("latestReviews") or []
         ]
@@ -239,12 +255,22 @@ class GhCli:
     def approve(self, number: int, body: str) -> None:
         self.run("pr", "review", str(number), "--approve", f"--body={body}")
 
-    def merge(self, number: int) -> bool:
-        state = json.loads(
+    def merge_state(self, number: int) -> str | None:
+        return json.loads(
             self.run("pr", "view", str(number), "--json", "mergeStateStatus") or "{}"
         ).get("mergeStateStatus")
+
+    def merge(self, number: int, head_oid: str | None = None) -> bool:
+        state = self.merge_state(number)
         if state in WAITING:
             log.info("PR %d waits: %s", number, state)
             return False
-        self.run("pr", "merge", str(number), "--merge")
+        match = [f"--match-head-commit={head_oid}"] if head_oid else []
+        try:
+            self.run("pr", "merge", str(number), "--merge", *match)
+        except ExternalToolError:
+            # GitHub may compute the state only now (it was UNKNOWN).
+            if self.merge_state(number) in WAITING:
+                return False
+            raise
         return True

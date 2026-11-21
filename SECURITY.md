@@ -14,6 +14,11 @@ this repository, or contact the maintainers directly.
   and Dependabot keeps them current after a 7-day cooldown.
 - `git` and `gh` are always run with argument lists, never through a shell.
 - The web UI (`skill-dojo serve`) is local only and binds to `127.0.0.1`.
+- Approval facts come only from GitHub and git: approving reviews of the PR's final
+  head commit plus the person who merged, for PRs from this repository (never a
+  fork). `approvals.yaml` on staging is never trusted; promote reads main's copy.
+- `review approve --head <sha>` merges only while the PR still points at the commit
+  that was reviewed. Turn on "dismiss stale approvals" in branch protection too.
 - The dev container only mounts this project.
 
 ## Repository baseline

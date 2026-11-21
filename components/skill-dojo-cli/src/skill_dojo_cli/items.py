@@ -45,26 +45,21 @@ def sync(item: ItemOption = None) -> None:
         echo_candidate(candidate)
 
 
-PartsArgument = Annotated[
-    list[str], typer.Argument(help="Parts as source:plugin/kind/name.")
-]
+PARTS = typer.Argument(help="Parts as source:plugin/kind/name.")
+PartsArgument = Annotated[list[str], PARTS]
 
 
 @bundle_app.command("create")
 def bundle_create(
     name: str,
-    parts: Annotated[
-        list[str] | None, typer.Argument(help="Parts as source:plugin/kind/name.")
-    ] = None,
+    parts: Annotated[list[str] | None, PARTS] = None,
     description: Annotated[str | None, typer.Option(help="Plugin text.")] = None,
     category: Annotated[str | None, typer.Option(help="Catalog category.")] = None,
 ) -> None:
     """Create a new bundle plugin as a candidate PR."""
     ctx = build_context(Path.cwd(), need_actor=True)
     echo_candidate(
-        core.bundle_create(
-            ctx, name, parts or [], description=description, category=category
-        )
+        core.bundle_create(ctx, name, parts, description=description, category=category)
     )
 
 

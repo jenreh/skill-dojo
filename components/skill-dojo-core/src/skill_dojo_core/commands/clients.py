@@ -2,7 +2,7 @@
 
 import logging
 
-from skill_dojo_core.commands.vendor import REF_RE
+from skill_dojo_core import git
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
 from skill_dojo_core.models import Client
@@ -15,11 +15,6 @@ log = logging.getLogger(__name__)
 
 class ClientsResult(Result):
     clients: list[Client]
-
-
-def _check_ref(ref: str) -> None:
-    if not REF_RE.match(ref) or ".." in ref:
-        raise InvalidInputError(f"'{ref}' is not a valid git ref")
 
 
 def clients_list(ctx: Context) -> ClientsResult:
@@ -38,7 +33,7 @@ def clients_add(
     """Record that ``name`` uses ``ref`` (a tag or branch)."""
     if not name.strip():
         raise InvalidInputError("client name must not be empty")
-    _check_ref(ref)
+    git.check_ref(ref)
     with repo_lock(ctx.repo):
         reg = Registry.load(ctx.repo)
         clients = reg.clients.clients

@@ -95,9 +95,18 @@ esac
     review = gh.reviews(8)[0]
     assert (review.user, review.state) == ("dave", "APPROVED")
     gh.approve(8, "ok")
-    assert gh.merge(8) is True
+    assert gh.merge(8, head_oid="b" * 40) is True
     assert gh.merge(9) is False
     calls = (tmp_path / "calls").read_text()
     assert "pr review 8 --approve --body=ok" in calls
-    assert "pr merge 8 --merge" in calls
+    assert f"pr merge 8 --merge --match-head-commit={'b' * 40}" in calls
     assert "pr merge 9" not in calls
+
+
+def test_find_open_pull_request_ignores_forks(tmp_path: Path) -> None:
+    fork = PR_JSON.replace(
+        '"state": "OPEN"', '"state": "OPEN", "isCrossRepository": true'
+    )
+    script = f"""echo '[{fork}]'\n"""
+    gh = GhCli(cwd=tmp_path, executable=fake_gh(tmp_path, script))
+    assert gh.find_open_pull_request("h", "staging") is None

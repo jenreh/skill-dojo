@@ -331,6 +331,19 @@ stamps correct approvals (including a PR merged "on github.com" in the fake) →
 tag; forbidden item and wrong channel cannot be promoted; revoke lists the client of the
 affected tag.
 
+As built (phase 4 review):
+- An approval is a merged candidate PR of this repo: approving reviews of the final
+  head plus the merger; the PR author counts only when nobody else approved or merged.
+  The content digest is the item's `treeSha256` at the merge commit.
+- Bundle parts are `source:plugin/kind/name`; source `local` means this repo's local
+  plugins. A pending candidate of the bundle is carried over.
+- `revoke --rollback` picks the newest approved release older than main's content;
+  `--to <tag>` picks one explicitly. Both set `quarantined: true`.
+- Quarantine lands through its own small PR into staging; `sync` already skips an
+  item while that PR is open.
+- Not yet: local items are exempt from the approval check (their PR review is the
+  gate), see the design's "Change a local skill" flow.
+
 ## Phase 5: MCP Registry source
 
 1. `mcp_registry` catalog reader (httpx) for the official MCP Registry API; browse servers.

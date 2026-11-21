@@ -34,6 +34,24 @@ class FakeGitHub:
         self.calls.append(("current_user", ()))
         return self.user
 
+    def _head_oid(self, head: str) -> str | None:
+        if self.remote is None:
+            return None
+        out = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/heads/{head}"],
+            cwd=self.remote,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return out.stdout.strip() or None
+
+    def _live(self, pr: PullRequest) -> PullRequest:
+        """An open PR's head follows its branch, as on GitHub."""
+        if pr.state != "OPEN" or pr.cross_repository:
+            return pr
+        return pr.model_copy(update={"head_oid": self._head_oid(pr.head)})
+
     def _replace(self, pr: PullRequest) -> PullRequest:
         self.pulls = [pr if p.number == pr.number else p for p in self.pulls]
         return pr
@@ -43,7 +61,10 @@ class FakeGitHub:
             (
                 p
                 for p in self.pulls
-                if p.head == head and p.base == base and p.state == "OPEN"
+                if p.head == head
+                and p.base == base
+                and p.state == "OPEN"
+                and not p.cross_repository
             ),
             None,
         )
@@ -74,13 +95,28 @@ class FakeGitHub:
         self.comments.setdefault(number, []).append(body)
 
     def get(self, number: int) -> PullRequest:
-        return next(p for p in self.pulls if p.number == number)
+        return self._live(next(p for p in self.pulls if p.number == number))
+
+    def open_fork_pull_request(self, head: str, base: str) -> PullRequest:
+        """A PR from someone's fork whose branch happens to have ``head``'s name."""
+        pr = self.open_pull_request(head, base, "fork", "")
+        return self._replace(
+            pr.model_copy(
+                update={
+                    "cross_repository": True,
+                    "author": "mallory",
+                    "head_oid": "f" * 40,
+                }
+            )
+        )
 
     def get_pull_request(self, number: int) -> PullRequest:
         return self.get(number)
 
     def list_open_pull_requests(self, base: str) -> list[PullRequest]:
-        return [p for p in self.pulls if p.base == base and p.state == "OPEN"]
+        return [
+            self._live(p) for p in self.pulls if p.base == base and p.state == "OPEN"
+        ]
 
     def list_merged_pull_requests(self, base: str) -> list[PullRequest]:
         merged = [p for p in self.pulls if p.base == base and p.state == "MERGED"]
@@ -98,19 +134,27 @@ class FakeGitHub:
 
     def add_review(self, number: int, user: str, state: str = "APPROVED") -> None:
         self.review_log.setdefault(number, []).append(
-            Review(user=user, state=state, submitted_at="2026-11-21T10:30:00Z")
+            Review(
+                user=user,
+                state=state,
+                submitted_at="2026-11-21T10:30:00Z",
+                commit=self.get(number).head_oid,
+            )
         )
 
     def approve(self, number: int, body: str) -> None:
         self.calls.append(("approve", (number, body)))
         self.add_review(number, self.user)
 
-    def merge(self, number: int, merged_by: str | None = None) -> bool:
+    def merge(
+        self, number: int, head_oid: str | None = None, *, merged_by: str | None = None
+    ) -> bool:
         self.calls.append(("merge", (number,)))
         if number in self.blocked:
             return False
         pr = self.get(number)
         assert pr.state == "OPEN", f"PR {number} is {pr.state}"
+        assert head_oid is None or head_oid == pr.head_oid, "head moved"
         assert self.remote is not None, "FakeGitHub.remote is not set"
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "w"
@@ -134,6 +178,7 @@ class FakeGitHub:
                     "merged_at": MERGED_AT,
                     "merge_commit": commit,
                     "merged_by": merged_by or self.user,
+                    "head_oid": pr.head_oid,
                 }
             )
         )

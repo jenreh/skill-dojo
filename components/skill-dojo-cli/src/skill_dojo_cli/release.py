@@ -43,11 +43,18 @@ def revoke(
         str | None,
         typer.Option(help="Roll back to the item as it is at this tag or ref."),
     ] = None,
+    rollback: Annotated[
+        bool, typer.Option(help="Roll back to the last approved release.")
+    ] = False,
     reason: Annotated[str, typer.Option(help="Why, for the PR body.")] = "",
 ) -> None:
     """Remove or roll back an item on main through a hotfix PR."""
     result = core.revoke(
-        build_context(Path.cwd(), need_actor=True), item, to=to, reason=reason
+        build_context(Path.cwd(), need_actor=True),
+        item,
+        to=to,
+        rollback=rollback,
+        reason=reason,
     )
     typer.echo(f"{result.item}: {result.action}")
     typer.echo(f"  Hotfix PR: {result.pull_request.url}")

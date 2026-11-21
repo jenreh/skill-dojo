@@ -155,6 +155,8 @@ def test_bundle_lifecycle(
     skill = show(admin, f"origin/{added.branch}", "plugins/kit/skills/lint/SKILL.md")
     assert f'acme.registry/source-marketplace: "{upstreams[1].url}"' in skill
     assert 'acme.registry/source-path: "plugins/tools/skills/lint"' in skill
+    greet = show(admin, f"origin/{added.branch}", "plugins/kit/skills/greet/SKILL.md")
+    assert 'acme.registry/source-license: "MIT"' in greet
     body = fake_github.get(number(added)).body
     assert "Validation errors" not in body
     assert "from `ap:hello`" in body
@@ -232,6 +234,9 @@ def test_review_commands(
     assert quarantined.status == "quarantined"
     assert quarantined.quarantine is not None
     assert quarantined.quarantine.head == "quarantine/hello"
+    # Until that PR is merged, sync already treats the item as quarantined.
+    ap.commit({"plugins/hello/NEWER.md": "newer\n"})
+    assert sync(admin, item="hello").candidates[0].status == "quarantined"
     items = ItemsFile.model_validate(
         yaml_data(show(admin, "origin/quarantine/hello", "registry/items.yaml"))
     )
@@ -317,6 +322,13 @@ def test_promote_blocks_restricted_and_unapproved_content(
     edit_item(admin, "hello", risk_tier=RiskTier.RESTRICTED)
     with pytest.raises(PolicyError, match="restricted needs 2 reviewers"):
         promote(admin)
+    # An author who merges does not count as a second reviewer.
+    tools = mirror(admin, "cl", "tools")
+    fake_github.add_review(number(tools), "dave")
+    review_approve(admin, number(tools))
+    edit_item(admin, "tools", risk_tier=RiskTier.RESTRICTED)
+    with pytest.raises(PolicyError, match=f"pull/{number(tools)} has 1"):
+        promote(admin)
     edit_staging(
         admin, lambda t: t + "\nhand edit\n", "plugins/hello/skills/greet/SKILL.md"
     )
@@ -327,6 +339,15 @@ def test_promote_blocks_restricted_and_unapproved_content(
         return json.dumps(data)
 
     edit_staging(admin, relock, "registry/lock.json")
+    with pytest.raises(PolicyError, match="no merged candidate PR approved"):
+        promote(admin)
+    # A forged approval in staging's approvals.yaml is ignored.
+    forged = (
+        "approvals:\n  - item: hello\n    digest: " + "f" * 64 + "\n"
+        "    pull_request: https://github.invalid/acme/marketplace/pull/999\n"
+        "    reviewers: [x, y]\n    approved_at: '2026-11-21T12:00:00Z'\n"
+    )
+    edit_staging(admin, lambda _: forged, "registry/approvals.yaml")
     with pytest.raises(PolicyError, match="no merged candidate PR approved"):
         promote(admin)
 
@@ -376,10 +397,10 @@ def test_revoke_rolls_back_to_a_tag(
     fake_github.merge(number(promote(admin)))
     second = release(admin)
     assert second.tag == "marketplace-v2026.11.21.2"
-    assert "Updated:" not in second.notes or "hello" in second.notes
+    assert "Updated:\n- hello 1.0.0 (content " in second.notes
     clients_add(admin, "old", first)
     clients_add(admin, "new", second.tag)
-    result = revoke(admin, "hello", to=first)
+    result = revoke(admin, "hello", rollback=True)
     assert result.action == "rolled-back"
     assert [c.name for c in result.affected_clients] == ["new"]
     items = show(admin, "origin/revoke/hello", "registry/items.yaml")
@@ -393,6 +414,19 @@ def test_revoke_rolls_back_to_a_tag(
     assert 'acme.registry/approved-by: "alice"' in skill
     with pytest.raises(InvalidInputError):
         revoke(admin, "hello", to="no-such-tag")
+    explicit = revoke(admin, "hello", to=first)
+    assert explicit.pull_request.number == result.pull_request.number
+    # The hotfix lands on main; staging has not taken the back-merge yet.
+    fake_github.merge(result.pull_request.number)
+    # Staging untouched: merging main keeps the flag, so main has it all.
+    assert promote(admin).status == "up-to-date"
+    # Main is at the first release now; nothing older is left.
+    with pytest.raises(NotFoundError, match="no earlier approved release"):
+        revoke(admin, "hello", rollback=True)
+    # A staging edit that drops the flag in the merge is caught.
+    edit_item(admin, "hello", quarantined=False, category="Edited")
+    with pytest.raises(PolicyError, match="quarantined on main"):
+        promote(admin)
 
 
 def test_bundle_agent_mcp_and_local_parts(
@@ -467,3 +501,66 @@ def test_bundle_agent_mcp_and_local_parts(
         bundle_add(admin, "kit", ["zz:box/agent/rev"])
     with pytest.raises(NotFoundError, match="no bundle"):
         bundle_add(admin, "own", ["mx:box/agent/rev"])
+
+
+def test_fork_prs_and_stale_approvals_do_not_count(
+    admin: Context, upstreams: tuple[FixtureRepo, ...], fake_github: FakeGitHub
+) -> None:
+    candidate = mirror(admin, "ap", "hello")
+    fork = fake_github.open_fork_pull_request(candidate.branch, "staging")
+    assert [e.pull_request.number for e in review_list(admin).entries] == [
+        number(candidate)
+    ]
+    with pytest.raises(InvalidInputError, match="fork"):
+        review_approve(admin, fork.number)
+    head = review_show(admin, number(candidate)).pull_request.head_oid
+    assert head is not None
+    fake_github.add_review(number(candidate), "dave")
+    # A new commit lands on the branch after dave approved.
+    wt = worktree(admin, f"origin/{candidate.branch}")
+    (wt / "NOTES.md").write_text("later\n")
+    git(wt, "add", "-A")
+    git(wt, "commit", "-q", "-m", "later")
+    git(wt, "push", "-q", "origin", f"HEAD:{candidate.branch}")
+    with pytest.raises(ConflictError, match="review again"):
+        review_approve(admin, number(candidate), head=head)
+    fake_github.merge_on_github(number(candidate), reviewers=[], merged_by="carol")
+    trap = fake_github.open_fork_pull_request("promote/2026-11-21", "main")
+    result = promote(admin)
+    assert result.status == "opened"
+    assert number(result) != trap.number
+    assert fake_github.get(trap.number).title == "fork"
+    assert [a.reviewers for a in result.approvals] == [["carol"]]
+
+
+def test_lock_and_part_paths_are_validated() -> None:
+    from skill_dojo_core.models import ItemLock, Part
+
+    with pytest.raises(ValueError, match="relative"):
+        ItemLock.model_validate(
+            {
+                "kind": "bundle",
+                "upstream": {"repository": "r", "commit": "c", "path": "p"},
+                "treeSha256": "a" * 64,
+                "files": {},
+                "generated": ["../../etc/passwd"],
+            }
+        )
+    with pytest.raises(ValueError):
+        Part(kind="skill", name="s", source="a", upstream_plugin="b/../../..")
+    with pytest.raises(ValueError):
+        Part(kind="skill", name="../s")
+
+
+def test_bundle_refuses_symlinked_folders(
+    admin: Context, upstreams: tuple[FixtureRepo, ...], fake_github: FakeGitHub
+) -> None:
+    kit = bundle_create(admin, "kit", ["ap:hello/skill/greet"])
+    review_approve(admin, number(kit))
+    wt = worktree(admin, "origin/staging")
+    (wt / "plugins/kit/agents").symlink_to("../../registry")
+    git(wt, "add", "-A")
+    git(wt, "commit", "-q", "-m", "link")
+    git(wt, "push", "-q", "origin", "HEAD:staging")
+    with pytest.raises(InvalidInputError, match="symlink"):
+        bundle_add(admin, "kit", ["cl:tools/skill/lint"])

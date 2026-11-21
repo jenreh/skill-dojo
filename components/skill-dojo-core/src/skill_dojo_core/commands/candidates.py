@@ -15,7 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from skill_dojo_core import builder, frontmatter, git, hashing, jsontext, risk, sources
-from skill_dojo_core.branches import base_branch, commit_and_push, remote_start, view
+from skill_dojo_core.branches import (
+    base_branch,
+    candidate_branch,
+    commit_and_push,
+    open_or_update,
+    remote_start,
+    view,
+)
 from skill_dojo_core.commands.sources import checkout_source, get_source
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
@@ -304,13 +311,8 @@ def publish(
     ctx: Context, item_id: str, *, branch: str, base: str, title: str, body: str
 ) -> tuple[PullRequest, str]:
     """Open or update the candidate PR and close older ones of the same item."""
-    open_pr = ctx.github.find_open_pull_request(branch, base)
-    if open_pr is None:
-        pr, status = ctx.github.open_pull_request(branch, base, title, body), "opened"
-    else:
-        pr = ctx.github.update_pull_request(open_pr.number, title, body)
-        status = "updated"
-    prefix = f"candidate/{item_id}/"
+    pr, status = open_or_update(ctx, branch, base, title, body)
+    prefix = candidate_branch(item_id, "")
     for stale in ctx.github.list_open_pull_requests(base):
         if stale.head.startswith(prefix) and stale.number != pr.number:
             ctx.github.close_pull_request(stale.number, f"Superseded by {pr.url}.")
@@ -359,7 +361,7 @@ def make_candidate(
                 return CandidateResult(
                     item=item_id, commit=fetched.commit, branch="", status="unchanged"
                 )
-            branch = f"candidate/{item_id}/{fetched.commit[:12]}"
+            branch = candidate_branch(item_id, fetched.commit)
             commit_and_push(wt, branch, f"candidate: {item_id} {fetched.commit[:12]}")
     title = f"candidate: {item_id} @ {fetched.commit[:12]}"
     pr, status = publish(
@@ -375,17 +377,6 @@ def make_candidate(
         flags=built.flags,
         status=status,
     )
-
-
-def manifest_version(root: Path) -> str | None:
-    for rel in hashing.MANIFESTS:
-        try:
-            data = json.loads((root / rel).read_text(encoding="utf-8"))
-        except OSError, UnicodeDecodeError, ValueError:
-            continue
-        if isinstance(data, dict) and isinstance(data.get("version"), str):
-            return data["version"]
-    return None
 
 
 def _write_candidate(  # noqa: PLR0917
@@ -417,7 +408,7 @@ def _write_candidate(  # noqa: PLR0917
     files = hashing.hash_tree(root, reg.config.namespace)
     reg.lock.items[item_id] = ItemLock(
         kind=ItemKind.MIRROR,
-        version=fetched.plugin.version or manifest_version(root),
+        version=fetched.plugin.version or builder.manifest_version(root),
         upstream=Upstream(
             repository=fetched.repository,
             commit=fetched.commit,

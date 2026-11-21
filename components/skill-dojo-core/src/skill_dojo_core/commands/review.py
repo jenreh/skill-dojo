@@ -8,17 +8,25 @@ reviewer or a check is reported as ``waiting``.
 import logging
 
 from skill_dojo_core import git
-from skill_dojo_core.branches import base_branch, commit_and_push, remote_start, view
-from skill_dojo_core.commands.vendor import REF_RE
+from skill_dojo_core.branches import (
+    CANDIDATE,
+    QUARANTINE,
+    base_branch,
+    candidate_item,
+    commit_and_push,
+    open_or_update,
+    remote_start,
+    view,
+)
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError
 from skill_dojo_core.github import PullRequest
 from skill_dojo_core.registry import Registry
+from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
 
 log = logging.getLogger(__name__)
 
-CANDIDATE = "candidate/"
 TOOL_PREFIXES = (CANDIDATE, "promote/", "revoke/", "quarantine/")
 
 
@@ -44,19 +52,13 @@ class ReviewActionResult(Result):
     quarantine: PullRequest | None = None
 
 
-def candidate_item(head: str) -> str | None:
-    """The item of a ``candidate/<item>/<sha>`` branch."""
-    parts = head.split("/")
-    if len(parts) == 3 and head.startswith(CANDIDATE):  # noqa: PLR2004
-        return parts[1]
-    return None
-
-
 def tool_pull_request(ctx: Context, number: int) -> PullRequest:
     """An open PR on a branch the tool made, or a typed error."""
     pr = ctx.github.get_pull_request(number)
-    if not pr.head.startswith(TOOL_PREFIXES) or not REF_RE.match(pr.head):
+    if not pr.head.startswith(TOOL_PREFIXES) or not git.is_ref(pr.head):
         raise InvalidInputError(f"PR #{number} is not a skill-dojo PR ({pr.head})")
+    if pr.cross_repository:
+        raise InvalidInputError(f"PR #{number} comes from a fork, not from the tool")
     if pr.state != "OPEN":
         raise ConflictError(f"PR #{number} is {pr.state.lower()}")
     return pr
@@ -68,7 +70,7 @@ def review_list(ctx: Context) -> ReviewListResult:
     entries = [
         ReviewEntry(pull_request=pr, item=candidate_item(pr.head))
         for pr in ctx.github.list_open_pull_requests(base)
-        if pr.head.startswith(CANDIDATE)
+        if pr.head.startswith(CANDIDATE) and not pr.cross_repository
     ]
     return ReviewListResult(entries=entries)
 
@@ -76,31 +78,32 @@ def review_list(ctx: Context) -> ReviewListResult:
 def review_show(ctx: Context, number: int) -> ReviewShowResult:
     """The PR with its changed files (``git diff --name-status``)."""
     pr = tool_pull_request(ctx, number)
-    for branch in (pr.base, pr.head):
-        git.run(
-            ctx.repo,
-            "fetch",
-            "-q",
-            "origin",
-            f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
-        )
-    out = git.run(
-        ctx.repo,
-        "diff",
-        "--name-status",
-        f"origin/{pr.base}...origin/{pr.head}",
+    base, head = (
+        git.fetch_branch(ctx.repo, pr.base),
+        git.fetch_branch(ctx.repo, pr.head),
     )
+    if pr.head_oid and git.run(ctx.repo, "rev-parse", head) != pr.head_oid:
+        raise ConflictError(f"PR #{number} head moved while fetching; try again")
+    out = git.run(ctx.repo, "diff", "--name-status", f"{base}...{head}")
     files = [line for line in out.splitlines() if line]
     return ReviewShowResult(pull_request=pr, item=candidate_item(pr.head), files=files)
 
 
-def review_approve(ctx: Context, number: int) -> ReviewActionResult:
-    """Submit an approving review, then merge (or report ``waiting``)."""
+def review_approve(
+    ctx: Context, number: int, *, head: str | None = None
+) -> ReviewActionResult:
+    """Submit an approving review, then merge (or report ``waiting``).
+
+    ``head`` is the commit the reviewer looked at (``review show``); the merge
+    happens only while the PR still points there.
+    """
     pr = tool_pull_request(ctx, number)
+    if head is not None and pr.head_oid is not None and head != pr.head_oid:
+        raise ConflictError(f"PR #{number} moved to {pr.head_oid[:12]}; review again")
     # GitHub refuses a review of one's own PR; merging it is the approval then.
     if pr.author != ctx.actor:
         ctx.github.approve(number, "Approved with skill-dojo.")
-    merged = ctx.github.merge(number)
+    merged = ctx.github.merge(number, head_oid=pr.head_oid)
     status = "merged" if merged else "waiting"
     ctx.report(f"PR #{number}: {status}")
     log.info("PR %d %s", number, status)
@@ -138,8 +141,8 @@ def review_quarantine(
         number, reason or f"Quarantined '{item_id}' with skill-dojo."
     )
     base = base_branch(Registry.load(ctx.repo))
-    branch = f"quarantine/{item_id}"
-    with view(ctx.repo, remote_start(ctx.repo, base)) as wt:
+    branch = f"{QUARANTINE}{item_id}"
+    with repo_lock(ctx.repo), view(ctx.repo, remote_start(ctx.repo, base)) as wt:
         reg = Registry.load(wt)
         item = reg.items.get(item_id)
         if item is None or item.quarantined:
@@ -151,14 +154,13 @@ def review_quarantine(
         item.quarantined = True
         reg.save_items()
         commit_and_push(wt, branch, f"chore: quarantine {item_id}")
-    quarantine = ctx.github.find_open_pull_request(branch, base)
-    if quarantine is None:
-        quarantine = ctx.github.open_pull_request(
-            branch,
-            base,
-            f"quarantine: {item_id}",
-            f"Stops candidates of `{item_id}` (closed #{number}).\n\n{reason}".strip(),
-        )
+    quarantine, _ = open_or_update(
+        ctx,
+        branch,
+        base,
+        f"quarantine: {item_id}",
+        f"Stops candidates of `{item_id}` (closed #{number}).\n\n{reason}".strip(),
+    )
     ctx.report(f"Quarantined {item_id}: {quarantine.url}")
     log.info("Quarantined %s", item_id)
     return ReviewActionResult(
