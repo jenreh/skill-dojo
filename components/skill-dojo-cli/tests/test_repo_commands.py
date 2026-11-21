@@ -77,6 +77,27 @@ def test_init_pin_defaults_and_conflicts(repo: Path) -> None:
     )
 
 
-def test_init_adopt_is_not_implemented_yet(repo: Path) -> None:
-    result = runner.invoke(app, ["init", "--adopt"])
-    assert result.exception is not None
+def test_init_adopt_reports(repo: Path) -> None:
+    mcp = '{"mcpServers": {"d": {"type": "stdio", "command": "uvx", "args": ["d"]}}}'
+    write_tree(
+        repo,
+        {
+            "plugins/hello/plugin.json": agent_plugin_manifest("hello"),
+            "plugins/hello/.mcp.json": mcp,
+            "plugins/hello/skills/up/SKILL.md": skill_md("up", "Upstream skill here."),
+            "plugins/hello/skills/up/LICENSE": "MIT\n",
+        },
+    )
+    result = invoke("init", "--adopt", "--tool-git", "2" * 40)
+    assert result.exit_code == 0, result.output
+    assert "Adopted 1 plugin(s)" in result.output
+    assert "Floating MCP references" in result.output
+    assert "likely from upstream" in result.output
+
+
+def test_vendor_command(repo: Path, fixture_repos: FixtureRepos) -> None:
+    market = fixture_repos.create("market", {"skills/a/SKILL.md": "x\n"})
+    result = invoke("vendor", market.url)
+    assert result.exit_code == 0, result.output
+    assert "Vendored .agents/market at main" in result.output
+    assert "Updated" in invoke("vendor", market.url, "--update").output

@@ -46,6 +46,41 @@ def _ensure_gitignore(repo: Path) -> bool:
     return True
 
 
+def scaffold(repo: Path, config: RegistryConfig) -> list[str]:
+    """Write the registry files, the validate workflow and the .gitignore line.
+
+    The caller holds the repo lock and has checked that no config exists.
+    """
+    created: list[str] = []
+    files = {
+        registry.CONFIG: config,
+        registry.SOURCES: SourcesFile(),
+        registry.ITEMS: ItemsFile(),
+        registry.APPROVALS: ApprovalsFile(),
+        registry.POLICY: ChannelPolicy(),
+        registry.CLIENTS: ClientsFile(),
+    }
+    for file_name, model in files.items():
+        registry.save_yaml_model(
+            repo, file_name, model, defaults=file_name == registry.CONFIG
+        )
+        created.append(f"registry/{file_name}")
+    registry.save_lock(repo, LockFile())
+    created.append(f"registry/{registry.LOCK}")
+    workflow = repo / workflows.VALIDATE_WORKFLOW
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text(workflows.validate_workflow(config.tool), encoding="utf-8")
+    created.append(workflows.VALIDATE_WORKFLOW)
+    if _ensure_gitignore(repo):
+        created.append(".gitignore")
+    return created
+
+
+def ensure_no_config(repo: Path) -> None:
+    if registry.registry_path(repo, registry.CONFIG).exists():
+        raise ConflictError("registry/config.yaml already exists")
+
+
 def init(
     ctx: Context,
     *,
@@ -62,31 +97,9 @@ def init(
         namespace=Namespace.from_name(market),
         tool=tool,
     )
-    created: list[str] = []
     with repo_lock(repo):
-        if registry.registry_path(repo, registry.CONFIG).exists():
-            raise ConflictError("registry/config.yaml already exists")
-        files = {
-            registry.CONFIG: config,
-            registry.SOURCES: SourcesFile(),
-            registry.ITEMS: ItemsFile(),
-            registry.APPROVALS: ApprovalsFile(),
-            registry.POLICY: ChannelPolicy(),
-            registry.CLIENTS: ClientsFile(),
-        }
-        for file_name, model in files.items():
-            registry.save_yaml_model(
-                repo, file_name, model, defaults=file_name == registry.CONFIG
-            )
-            created.append(f"registry/{file_name}")
-        registry.save_lock(repo, LockFile())
-        created.append(f"registry/{registry.LOCK}")
-        workflow = repo / workflows.VALIDATE_WORKFLOW
-        workflow.parent.mkdir(parents=True, exist_ok=True)
-        workflow.write_text(workflows.validate_workflow(tool), encoding="utf-8")
-        created.append(workflows.VALIDATE_WORKFLOW)
-        if _ensure_gitignore(repo):
-            created.append(".gitignore")
+        ensure_no_config(repo)
+        created = scaffold(repo, config)
         created += builder.apply_build(Registry.load(repo))
     ctx.report(f"Initialized marketplace '{market}'")
     log.info("Initialized marketplace %s", market)

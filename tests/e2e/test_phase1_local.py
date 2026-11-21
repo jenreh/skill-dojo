@@ -330,14 +330,19 @@ def test_symlink_outside_plugin_fails(curated: Context, tmp_path: Path) -> None:
     assert any("symlink points outside" in e for e in errors(curated))
 
 
-def test_local_skill_metadata_is_strict(curated: Context) -> None:
+def test_foreign_metadata_only_warns(curated: Context) -> None:
     add_plugin(curated.repo)
     skill = curated.repo / "plugins/hello/skills/greet/SKILL.md"
     skill.write_text(
-        skill.read_text().replace("---\n\n", "metadata:\n  author: me\n---\n\n", 1)
+        skill.read_text().replace(
+            "---\n\n", "metadata:\n  author: me\n  n: 3\n---\n\n", 1
+        )
     )
     local_add(curated, "plugins/hello")
-    assert any("'author' is not namespaced" in e for e in errors(curated))
+    assert errors(curated) == []
+    warnings = [str(w) for w in validate(curated).warnings]
+    assert any("'n' must be a string" in w for w in warnings)
+    assert any("'author' is not namespaced" in w for w in warnings)
 
 
 def test_local_add_lists_repo_paths(curated: Context) -> None:

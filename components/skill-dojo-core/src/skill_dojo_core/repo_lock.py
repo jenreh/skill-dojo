@@ -12,6 +12,18 @@ from skill_dojo_core.errors import RepoLockedError
 log = logging.getLogger(__name__)
 
 LOCK_FILE = Path("registry") / ".lock"
+GIT_LOCK_FILE = Path(".git") / "skill-dojo.lock"
+
+
+def lock_path(repo: Path) -> Path:
+    """``.git/skill-dojo.lock`` in a normal clone, else ``registry/.lock``.
+
+    Inside ``.git`` the lock never shows up as a change, even before ``init``.
+    """
+    if (repo / ".git").is_dir():
+        return repo / GIT_LOCK_FILE
+    return repo / LOCK_FILE
+
 
 if os.name == "nt":  # pragma: no cover
     import msvcrt
@@ -42,8 +54,8 @@ else:
 
 @contextmanager
 def repo_lock(repo: Path, timeout: float = 30.0) -> Generator[None]:
-    """Hold ``registry/.lock`` of ``repo`` for the duration of the block."""
-    path = repo / LOCK_FILE
+    """Hold the repo's lock file for the duration of the block."""
+    path = lock_path(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:

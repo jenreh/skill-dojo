@@ -68,7 +68,6 @@ STUBS = [
     ["clients", "add", "c", "main"],
     ["clients", "list"],
     ["clients", "remove", "c"],
-    ["vendor"],
 ]
 
 

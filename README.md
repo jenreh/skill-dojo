@@ -41,6 +41,8 @@ uv run skill-dojo --help
 | `skill-dojo lock refresh [--item]` | Recompute the lock entry of a local plugin after an edit |
 | `skill-dojo build [--check]` | Regenerate catalogs, missing manifests, branding, metadata and layout links |
 | `skill-dojo validate` | Agent Plugins / skill checks, untracked folders, drift, floating MCP references |
+| `skill-dojo init --adopt [--repository] [--tool-git SHA]` | Turn an existing marketplace into a curated one: every `plugins/*` becomes a local item; name, owner, layout, branding, categories and policies are read from the existing catalogs and manifests; floating MCP refs and likely vendored skills are reported |
+| `skill-dojo vendor <url> [--ref TAG] [--name] [--update]` | Consumer side: `git subtree` of a marketplace into `.agents/<name>` plus `.agents/skills` and `.claude/skills` links (replaces `add-skills.sh`) |
 
 ### Curated repo files
 

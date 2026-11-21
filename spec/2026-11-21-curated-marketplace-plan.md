@@ -221,6 +221,12 @@ Goal: the core that reads and writes a curated repo, with no network.
    metadata disagreement = error; drift = error; floating MCP reference (`latest`, no
    version, unpinned `npx -y pkg`, `uvx pkg`, image without digest) = error;
    metadata values not strings or not namespaced = error.
+   *Changed in phase 2 (adoption of jenreh/agent-skills):* only values in the tool's
+   own namespace must be strings (error). Non-string or non-namespaced keys outside
+   it are warnings for every item, because vendored upstream skills use them
+   (`author`, `version`, nested `openclaw` blocks) and cannot be edited without
+   forking. Adoption reports such skills as possibly vendored; phase 3 turns them
+   into mirror or bundle parts.
 5. **`build`**, ported from `scripts/codex_metadata.py` and `scripts/link-plugins.sh`:
    both catalogs (`.agents/plugins/marketplace.json`, `.claude-plugin/marketplace.json`)
    from `plugins/` + `registry/`, missing per-plugin manifests, optional branding
