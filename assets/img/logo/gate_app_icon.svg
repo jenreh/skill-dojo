@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="skill-dojo">
+  <style>
+    .tile{fill:#004A99}
+    .ink{fill:#FBF8F2}
+  </style>
+  <rect class="tile" width="64" height="64" rx="14"/>
+  <g class="ink" transform="translate(10.24 10.24) scale(0.68)">
+    <path id="kasagi" d="M3 9.5Q32 14.5 61 9.5L57 19.5H7Z"/>
+    <rect id="nuki" x="14" y="26.5" width="36" height="5"/>
+    <rect id="pillar-left" x="16" y="19.5" width="8" height="35"/>
+    <rect id="pillar-right" x="40" y="19.5" width="8" height="35"/>
+  </g>
+</svg>

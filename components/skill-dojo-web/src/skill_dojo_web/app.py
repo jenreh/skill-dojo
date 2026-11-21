@@ -3,6 +3,7 @@
 import appkit_mantine as mn
 import reflex as rx
 
+from skill_dojo_web.branding import FAVICON
 from skill_dojo_web.components.templates import navbar_template
 from skill_dojo_web.styles import base_style, base_stylesheets
 
@@ -19,6 +20,7 @@ def index() -> rx.Component:
 
 
 app = rx.App(
+    head_components=[rx.el.link(rel="icon", type="image/svg+xml", href=FAVICON)],
     stylesheets=base_stylesheets,
     style=base_style,  # ty: ignore[invalid-argument-type]  # reflex dynamic styling
 )

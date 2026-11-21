@@ -4,9 +4,11 @@ import pytest
 from typer.testing import CliRunner, Result
 
 from skill_dojo_cli.main import app
+from tests.support.fake_github import FakeGitHub
 from tests.support.fixture_repos import (
     FixtureRepos,
     agent_plugin_manifest,
+    git,
     skill_md,
     write_tree,
 )
@@ -101,3 +103,25 @@ def test_vendor_command(repo: Path, fixture_repos: FixtureRepos) -> None:
     assert result.exit_code == 0, result.output
     assert "Vendored .agents/market at main" in result.output
     assert "Updated" in invoke("vendor", market.url, "--update").output
+
+
+def test_source_mirror_sync_flags_commands(
+    repo: Path, fixture_repos: FixtureRepos, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeGitHub()
+    monkeypatch.setattr("skill_dojo_cli.context.GhCli", lambda cwd: fake)
+    monkeypatch.setenv("GITHUB_ACTOR", "ci")
+    invoke("init", "--name", "acme", "--tool-git", "1" * 40)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "init")
+    git(repo, "push", "-q", "origin", "HEAD:staging")
+    ap = fixture_repos.agent_plugins_marketplace()
+    assert invoke("source", "add", "ap", ap.url, "--allow", "hello").exit_code == 0
+    assert "agent_plugins_marketplace" in invoke("source", "list").output
+    assert "hello" in invoke("browse", "ap").output
+    mirrored = invoke("mirror", "ap", "hello")
+    assert "hello: opened" in mirrored.output
+    assert "No mirrors to sync" in invoke("sync").output
+    assert "## Risk flags" in invoke("flags").output
+    invoke("source", "add", "spare", ap.url)
+    assert "Removed" in invoke("source", "remove", "spare").output

@@ -183,6 +183,8 @@ select = [
     "E741",
     "RUF059",
 ]
+# Typer commands declare every CLI option as a parameter.
+"components/skill-dojo-cli/src/**/*.py" = ["PLR0917"]
 # Test helpers run git with fixed arguments.
 "tests/support/*.py" = ["S603", "S607"]
 # Command line scripts print their output and run tools with fixed arguments.
@@ -202,7 +204,12 @@ known-first-party = ["skill_dojo_core", "skill_dojo_cli", "skill_dojo_web"]
 
 [tool.pytest.ini_options]
 cache_dir = ".cache/pytest"
-testpaths = ["components/skill-dojo-core/tests", "components/skill-dojo-cli/tests", "components/skill-dojo-web/tests", "tests"]
+testpaths = [
+    "components/skill-dojo-core/tests",
+    "components/skill-dojo-cli/tests",
+    "components/skill-dojo-web/tests",
+    "tests",
+]
 addopts = "--import-mode=importlib"
 pythonpath = ["."]
 asyncio_mode = "auto"
@@ -213,7 +220,15 @@ asyncio_default_fixture_loop_scope = "function"
 python-version = "3.14"
 
 [tool.ty.src]
-include = ["components/skill-dojo-core/src", "components/skill-dojo-cli/src", "components/skill-dojo-web/src", "components/skill-dojo-core/tests", "components/skill-dojo-cli/tests", "components/skill-dojo-web/tests", "tests"]
+include = [
+    "components/skill-dojo-core/src",
+    "components/skill-dojo-cli/src",
+    "components/skill-dojo-web/src",
+    "components/skill-dojo-core/tests",
+    "components/skill-dojo-cli/tests",
+    "components/skill-dojo-web/tests",
+    "tests",
+]
 exclude = [
     ".agents",
     ".cache",

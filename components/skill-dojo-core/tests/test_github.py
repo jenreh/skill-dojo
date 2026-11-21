@@ -33,3 +33,33 @@ def test_missing_executable(tmp_path: Path) -> None:
     gh = GhCli(cwd=tmp_path, executable=str(tmp_path / "nope"))
     with pytest.raises(ExternalToolError, match="not installed"):
         gh.current_user()
+
+
+PR_JSON = (
+    '{"number": 7, "url": "https://github.invalid/o/r/pull/7", "title": "t", '
+    '"body": "b", "headRefName": "h", "baseRefName": "staging", "state": "OPEN"}'
+)
+
+
+def test_pull_request_commands(tmp_path: Path) -> None:
+    script = f"""case "$1 $2" in
+  "pr list") echo '[{PR_JSON}]' ;;
+  "pr create") echo https://github.invalid/o/r/pull/7 ;;
+  "pr view") echo '{PR_JSON}' ;;
+  "pr edit") ;;
+  "pr comment") echo "$@" > {tmp_path}/comment ;;
+esac
+"""
+    gh = GhCli(cwd=tmp_path, executable=fake_gh(tmp_path, script))
+    found = gh.find_open_pull_request("h", "staging")
+    assert found is not None
+    assert found.number == 7
+    assert gh.open_pull_request("h", "staging", "t", "b").base == "staging"
+    assert gh.update_pull_request(7, "t", "b").title == "t"
+    gh.comment(7, "hello")
+    assert "hello" in (tmp_path / "comment").read_text()
+
+
+def test_no_open_pull_request(tmp_path: Path) -> None:
+    gh = GhCli(cwd=tmp_path, executable=fake_gh(tmp_path, "echo '[]'\n"))
+    assert gh.find_open_pull_request("h", "b") is None

@@ -8,12 +8,21 @@ from pydantic import BaseModel
 import skill_dojo_core
 from skill_dojo_core import (
     AdoptResult,
+    BrowseResult,
     BuildResult,
+    CandidateResult,
     Finding,
+    FlagsResult,
     InitResult,
     LocalAddResult,
     LockRefreshResult,
+    PullRequest,
     Result,
+    RiskFlag,
+    Source,
+    SourcesResult,
+    SyncResult,
+    UpstreamPlugin,
     ValidationReport,
     VendorResult,
 )
@@ -30,6 +39,16 @@ EXAMPLES: list[BaseModel] = [
         marketplace="m", items=["x"], changed=[], floating_mcp=[], possibly_vendored=[]
     ),
     VendorResult(prefix=".agents/m", ref="main", updated=False, links=[]),
+    SourcesResult(sources=[Source(id="s", type="git", repository="o/r")]),
+    UPSTREAM := UpstreamPlugin(name="p", path="plugins/p", repository="o/r"),
+    BrowseResult(source="s", commit="c" * 40, plugins=[UPSTREAM]),
+    FLAG := RiskFlag(kind="hook", path="hooks/x", line=1, detail="new hook"),
+    PR := PullRequest(number=1, url="u", title="t", head="h", base="b"),
+    CANDIDATE := CandidateResult(
+        item="p", commit="c", branch="b", pull_request=PR, flags=[FLAG], status="opened"
+    ),
+    SyncResult(candidates=[CANDIDATE]),
+    FlagsResult(base="origin/staging", flags={"p": [FLAG]}, markdown="m"),
 ]
 
 

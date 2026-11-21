@@ -17,16 +17,33 @@ lock_app = typer.Typer(help="Maintain registry/lock.json.")
 ItemOption = Annotated[str | None, typer.Option(help="Only this item.")]
 
 
-def mirror(source_id: str, plugin: str) -> None:
-    """Mirror one upstream plugin as a candidate PR."""
-    not_implemented("mirror")
+def echo_candidate(result: core.CandidateResult) -> None:
+    where = f" {result.pull_request.url}" if result.pull_request else ""
+    typer.echo(f"{result.item}: {result.status}{where}")
+    for flag in result.flags:
+        line = f":{flag.line}" if flag.line else ""
+        typer.echo(f"  {flag.kind} {flag.path}{line} {flag.detail}")
 
 
-def sync(
-    item: ItemOption = None,
+def mirror(
+    source_id: str,
+    plugin: str,
+    item: Annotated[
+        str | None, typer.Option("--as", help="Item id (default: plugin name).")
+    ] = None,
 ) -> None:
+    """Mirror one upstream plugin as a candidate PR into staging."""
+    ctx = build_context(Path.cwd(), need_actor=True)
+    echo_candidate(core.mirror(ctx, source_id, plugin, item_id=item))
+
+
+def sync(item: ItemOption = None) -> None:
     """Open candidate PRs for upstream changes."""
-    not_implemented("sync")
+    result = core.sync(build_context(Path.cwd(), need_actor=True), item=item)
+    if not result.candidates:
+        typer.echo("No mirrors to sync.")
+    for candidate in result.candidates:
+        echo_candidate(candidate)
 
 
 @bundle_app.command("create")

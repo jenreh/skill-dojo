@@ -9,7 +9,7 @@ import typer
 import skill_dojo_core as core
 from skill_dojo_cli.context import build_context
 from skill_dojo_cli.output import echo_lines, echo_report
-from skill_dojo_core import not_implemented, tool_pin
+from skill_dojo_core import tool_pin
 
 
 def init(
@@ -79,10 +79,12 @@ def validate() -> None:
 
 
 def flags(
-    base: Annotated[str, typer.Option(help="Compare against this ref.")] = "staging",
+    base: Annotated[
+        str, typer.Option(help="Compare against this ref.")
+    ] = "origin/staging",
 ) -> None:
-    """Print the risk flags of the current branch against a base."""
-    not_implemented("flags")
+    """Print the risk flags (markdown) of the working tree against a base ref."""
+    typer.echo(core.flags(build_context(Path.cwd()), base=base).markdown)
 
 
 def vendor(

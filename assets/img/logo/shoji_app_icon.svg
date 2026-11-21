@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="skill-dojo">
+  <style>
+    .tile{fill:#004A99}
+    .line{fill:none;stroke:#FBF8F2;stroke-width:6}
+    .solid{fill:#FBF8F2}
+  </style>
+  <rect class="tile" width="64" height="64" rx="14"/>
+  <g transform="translate(10.24 10.24) scale(0.68)">
+    <rect id="frame" class="line" x="7" y="7" width="50" height="50" rx="3"/>
+    <path id="lattice" class="line" d="M36 7v50M7 25h50"/>
+    <rect id="panel" class="solid" x="36" y="7" width="21" height="18"/>
+  </g>
+</svg>

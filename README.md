@@ -42,6 +42,11 @@ uv run skill-dojo --help
 | `skill-dojo build [--check]` | Regenerate catalogs, missing manifests, branding, metadata and layout links |
 | `skill-dojo validate` | Agent Plugins / skill checks, untracked folders, drift, floating MCP references |
 | `skill-dojo init --adopt [--repository] [--tool-git SHA]` | Turn an existing marketplace into a curated one: every `plugins/*` becomes a local item; name, owner, layout, branding, categories and policies are read from the existing catalogs and manifests; floating MCP refs and likely vendored skills are reported |
+| `skill-dojo source add <id> <owner/name or URL> [--type] [--ref] [--allow]` / `list` / `remove` | Upstream sources: Agent Plugins or Claude marketplaces, or a plain git repo |
+| `skill-dojo browse <source>` | What a source offers at its current ref (remote plugin sources included) |
+| `skill-dojo mirror <source> <plugin> [--as id]` | Candidate PR into `staging`: vendored files pinned to the upstream commit, lock entry, metadata, risk flags |
+| `skill-dojo sync [--item]` | A candidate PR for every mirror on `staging` whose upstream moved (idempotent; quarantined items skipped) |
+| `skill-dojo flags [--base origin/staging]` | Risk flags of the working tree against a base, as markdown (the validate workflow posts them on PRs into `staging`) |
 | `skill-dojo vendor <url> [--ref TAG] [--name] [--update]` | Consumer side: `git subtree` of a marketplace into `.agents/<name>` plus `.agents/skills` and `.claude/skills` links (replaces `add-skills.sh`) |
 
 ### Curated repo files
