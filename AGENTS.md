@@ -141,7 +141,7 @@ Key rules:
 - Every `skill_dojo_core.commands` function takes a `Context` (repo, github, actor, now,
   progress). Core never reads cwd, env vars or `gh auth`, never prints or prompts.
   Results are pydantic models; failures are typed errors from `skill_dojo_core.errors`.
-- Writes take the per-repo lock (`repo_lock`, `registry/.lock`).
+- Writes take the per-repo lock (`repo_lock`: `.git/skill-dojo.lock`, else `registry/.lock`).
 - The only test seam is the `GitHub` Protocol (fake in `tests/support`). Git and the
   filesystem are always real (bare repos under `tmp_path`).
 - `skill-dojo serve` imports `skill_dojo_web` lazily; core + CLI release without web.

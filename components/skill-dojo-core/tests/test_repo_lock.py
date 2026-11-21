@@ -7,9 +7,12 @@ from skill_dojo_core import RepoLockedError
 from skill_dojo_core.repo_lock import repo_lock
 
 
-def test_lock_creates_registry_lock_file(tmp_path: Path) -> None:
+def test_lock_file_location(tmp_path: Path) -> None:
     with repo_lock(tmp_path):
         assert (tmp_path / "registry" / ".lock").exists()
+    (tmp_path / ".git").mkdir()
+    with repo_lock(tmp_path):
+        assert (tmp_path / ".git" / "skill-dojo.lock").exists()
 
 
 def test_second_lock_times_out(tmp_path: Path) -> None:

@@ -62,13 +62,19 @@ def vendor(
     repo = ctx.repo
     prefix = f".agents/{name}"
     # A consumer repo has no registry/; git's own index lock guards it.
-    if git.run(repo, "status", "--porcelain", "--untracked-files=no"):
+    if git.run(repo, "status", "--porcelain"):
         raise ConflictError("working tree is dirty; commit or stash first")
     exists = (repo / prefix).exists()
     if exists and not update:
         raise ConflictError(f"{prefix} exists; use --update to pull a new ref")
     if update and not exists:
         raise ConflictError(f"{prefix} does not exist; vendor it first")
+    links = _links(name)
+    for link, target in links.items():
+        path = repo / link
+        same = path.is_symlink() and str(path.readlink()) == target
+        if not same and (path.exists() or path.is_symlink()):
+            raise ConflictError(f"{link} exists and is not a link to {target}")
     action = "pull" if update else "add"
     git.run(
         repo,
@@ -82,19 +88,17 @@ def vendor(
         "-m",
         f"chore: vendor {name} at {ref}",
     )
-    links = []
-    for link, target in _links(name).items():
+    created = []
+    for link, target in links.items():
         path = repo / link
-        if path.is_symlink() and str(path.readlink()) == target:
+        if path.is_symlink():
             continue
-        if path.exists() or path.is_symlink():
-            raise ConflictError(f"{link} exists and is not a link to {target}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.symlink_to(target)
-        links.append(link)
-    if links:
-        git.run(repo, "add", "--", *links)
+        created.append(link)
+    if created:
+        git.run(repo, "add", "--", *created)
         git.run(repo, "commit", "-q", "-m", f"chore: link {name} skills for agents")
     ctx.report(f"Vendored {name} at {ref}")
     log.info("Vendored %s at %s", name, ref)
-    return VendorResult(prefix=prefix, ref=ref, updated=update, links=links)
+    return VendorResult(prefix=prefix, ref=ref, updated=update, links=created)

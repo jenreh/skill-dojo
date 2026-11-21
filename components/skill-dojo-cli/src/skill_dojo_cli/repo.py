@@ -43,10 +43,10 @@ def init(
         echo_lines(adopted.changed)
         if adopted.floating_mcp:
             typer.echo("\nFloating MCP references (pin them, then 'lock refresh'):")
-            echo_lines(adopted.floating_mcp)
+            echo_lines([str(f) for f in adopted.floating_mcp])
         if adopted.possibly_vendored:
             typer.echo("\nSkills with their own license (likely from upstream):")
-            echo_lines(adopted.possibly_vendored)
+            echo_lines([f.path for f in adopted.possibly_vendored])
         return
     result = core.init(ctx, name=name, tool=pin, repository=repository)
     typer.echo("Created:")

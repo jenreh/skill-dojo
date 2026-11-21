@@ -15,7 +15,7 @@ from skill_dojo_core import builder, catalogs, git
 from skill_dojo_core.commands.items import register_local
 from skill_dojo_core.commands.repo import ensure_no_config, scaffold
 from skill_dojo_core.context import Context
-from skill_dojo_core.errors import NotFoundError
+from skill_dojo_core.errors import InvalidInputError, NotFoundError
 from skill_dojo_core.models import (
     Branding,
     Item,
@@ -31,6 +31,7 @@ from skill_dojo_core.registry import Registry
 from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
 from skill_dojo_core.validation.mcp_pins import floating_reference
+from skill_dojo_core.validation.report import Finding
 
 log = logging.getLogger(__name__)
 
@@ -39,16 +40,23 @@ class AdoptResult(Result):
     marketplace: str
     items: list[str]
     changed: list[str]
-    floating_mcp: list[str]
-    possibly_vendored: list[str]
+    floating_mcp: list[Finding]
+    possibly_vendored: list[Finding]
 
 
 def _read_json(path: Path) -> dict[str, Any]:
+    """A JSON object, ``{}`` when the file is missing; broken files raise."""
+    if not path.is_file():
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, UnicodeDecodeError, json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InvalidInputError(
+            f"{path.name}: cannot adopt a broken file: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise InvalidInputError(f"{path.name}: top level must be an object")
+    return data
 
 
 def _most_common(values: list[Any]) -> Any:
@@ -109,10 +117,15 @@ def detect_branding(repo: Path, plugins: list[Path]) -> Branding | None:
     )
 
 
-def adopt_config(repo: Path, tool: ToolPin, repository: str | None) -> RegistryConfig:
-    plugins = _plugins(repo)
-    claude = _read_json(repo / catalogs.CLAUDE_CATALOG)
-    agents = _read_json(repo / catalogs.AGENTS_CATALOG)
+def adopt_config(
+    repo: Path,
+    plugins: list[Path],
+    catalog_data: tuple[dict[str, Any], dict[str, Any]],
+    tool: ToolPin,
+    repository: str | None,
+) -> RegistryConfig:
+    """Config from the existing (claude, agents) catalogs and manifests."""
+    claude, agents = catalog_data
     name = str(claude.get("name") or agents.get("name") or repo.name.lower())
     owner = claude.get("owner")
     entries = [e for e in agents.get("plugins") or [] if isinstance(e, dict)]
@@ -133,9 +146,8 @@ def adopt_config(repo: Path, tool: ToolPin, repository: str | None) -> RegistryC
     )
 
 
-def adopt_item(repo: Path, config: RegistryConfig, plugin: Path) -> Item:
+def adopt_item(config: RegistryConfig, agents: dict[str, Any], plugin: Path) -> Item:
     """A local item whose catalog entry matches the existing one."""
-    agents = _read_json(repo / catalogs.AGENTS_CATALOG)
     entry = next(
         (
             e
@@ -159,7 +171,7 @@ def adopt_item(repo: Path, config: RegistryConfig, plugin: Path) -> Item:
     return item
 
 
-def floating_servers(plugin: Path) -> list[str]:
+def floating_servers(plugin: Path) -> list[Finding]:
     found = []
     for rel in (builder.CLAUDE_MCP, builder.ROOT_MCP):
         path = plugin / rel
@@ -168,17 +180,37 @@ def floating_servers(plugin: Path) -> list[str]:
         servers = _read_json(path).get("mcpServers") or {}
         for name, server in servers.items():
             if isinstance(server, dict) and (problem := floating_reference(server)):
-                found.append(f"plugins/{plugin.name}/{rel}: {name}: {problem}")
+                found.append(
+                    Finding(
+                        level="error",
+                        path=f"plugins/{plugin.name}/{rel}",
+                        message=f"server '{name}': {problem}",
+                    )
+                )
     return found
 
 
-def possibly_vendored(plugin: Path) -> list[str]:
+def possibly_vendored(plugin: Path) -> list[Finding]:
     """Skills that carry their own license file were likely copied from upstream."""
-    return sorted(
-        f"plugins/{plugin.name}/skills/{skill.name}"
-        for skill in (plugin / "skills").glob("*")
+    return [
+        Finding(
+            level="warning",
+            path=f"plugins/{plugin.name}/skills/{skill.name}",
+            message="has its own license; register it as a mirror or bundle part",
+        )
+        for skill in sorted((plugin / "skills").glob("*"))
         if skill.is_dir() and any(skill.glob("LICENSE*"))
-    )
+    ]
+
+
+def _check_adoptable(plugins: list[Path]) -> None:
+    """Fail before writing anything when a plugin cannot be adopted."""
+    for plugin in plugins:
+        if not _manifest(plugin):
+            raise InvalidInputError(
+                f"plugins/{plugin.name}: no readable plugin.json or "
+                ".claude-plugin/plugin.json"
+            )
 
 
 def adopt(ctx: Context, *, tool: ToolPin, repository: str | None = None) -> AdoptResult:
@@ -187,12 +219,15 @@ def adopt(ctx: Context, *, tool: ToolPin, repository: str | None = None) -> Adop
     with repo_lock(repo):
         ensure_no_config(repo)
         commit = git.head(repo)
-        config = adopt_config(repo, tool, repository)
         plugins = _plugins(repo)
+        _check_adoptable(plugins)
+        claude = _read_json(repo / catalogs.CLAUDE_CATALOG)
+        agents = _read_json(repo / catalogs.AGENTS_CATALOG)
+        config = adopt_config(repo, plugins, (claude, agents), tool, repository)
         changed = scaffold(repo, config)
         reg = Registry.load(repo)
         for plugin in plugins:
-            item = adopt_item(repo, config, plugin)
+            item = adopt_item(config, agents, plugin)
             generated = register_local(reg, item, commit)
             changed += [f"plugins/{plugin.name}/{rel}" for rel in generated]
         reg.save_items()

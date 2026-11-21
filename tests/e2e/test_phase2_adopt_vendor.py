@@ -125,10 +125,12 @@ def test_adopt_reproduces_catalogs_and_only_adds_metadata(
     result = adopt(ctx, tool=PIN, repository="team/skills")
     assert result.marketplace == "team"
     assert result.items == ["team-core"]
-    assert result.floating_mcp == [
-        "plugins/team-core/.mcp.json: docs: 'docs-mcp' has no version"
+    assert [str(f) for f in result.floating_mcp] == [
+        "plugins/team-core/.mcp.json: server 'docs': 'docs-mcp' has no version"
     ]
-    assert result.possibly_vendored == ["plugins/team-core/skills/vendored"]
+    assert [f.path for f in result.possibly_vendored] == [
+        "plugins/team-core/skills/vendored"
+    ]
     tracked = sorted(git(repo, "diff", "--name-only").splitlines())
     assert tracked == [
         "plugins/team-core/.claude-plugin/plugin.json",
@@ -218,3 +220,37 @@ def test_vendor_input_checks(
         vendor(ctx, "https://x.invalid/a.git", name="../up")
     with pytest.raises(ConflictError, match="vendor it first"):
         vendor(ctx, "https://x.invalid/a.git", update=True)
+
+
+def test_adopt_fails_before_writing(
+    fixture_repos: FixtureRepos, make_context: MakeContext
+) -> None:
+    repo = legacy_marketplace(fixture_repos, ["pkg@1.0.0"])
+    (repo / "plugins/zz-empty").mkdir()
+    with pytest.raises(InvalidInputError, match="zz-empty"):
+        adopt(make_context(repo), tool=PIN)
+    assert not (repo / "registry").exists()
+    assert git(repo, "status", "--porcelain") == ""
+    (repo / "plugins/zz-empty").rmdir()
+    (repo / ".agents/plugins/marketplace.json").write_text("{broken")
+    with pytest.raises(InvalidInputError, match="broken"):
+        adopt(make_context(repo), tool=PIN)
+    assert not (repo / "registry").exists()
+
+
+def test_vendor_checks_links_before_the_subtree(
+    fixture_repos: FixtureRepos, make_context: MakeContext
+) -> None:
+    market = fixture_repos.create("mk", {"skills/a/SKILL.md": "x\n"})
+    remote, consumer = fixture_repos.curated("cons")
+    (consumer / ".claude/skills").mkdir(parents=True)
+    (consumer / ".claude/skills/own.md").write_text("mine\n")
+    remote_head = git(consumer, "rev-parse", "HEAD")
+    with pytest.raises(ConflictError, match="dirty"):
+        vendor(make_context(consumer), market.url)
+    git(consumer, "add", ".claude")
+    git(consumer, "commit", "-q", "-m", "own skills")
+    with pytest.raises(ConflictError, match="not a link"):
+        vendor(make_context(consumer), market.url)
+    assert not (consumer / ".agents/mk").exists()
+    assert git(consumer, "rev-list", "--count", f"{remote_head}..HEAD") == "1"
