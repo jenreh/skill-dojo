@@ -19,9 +19,6 @@ includes:
     taskfile: ./taskfiles/Taskfile.reflex.yml
     flatten: true
 
-  db:
-    taskfile: ./taskfiles/Taskfile.db.yml
-
   # docker:
   #   taskfile: ./taskfiles/Taskfile.docker.yml
   #   vars:
@@ -41,17 +38,7 @@ includes:
 silent: true
 
 vars:
-  # Derived from the wheel package declared in pyproject.toml, so it always
-  # matches the real package name (no template substitution needed here).
-  # Shell built-ins only (no awk/grep/sed), so it also runs on Windows, where
-  # Task's shell has just a small set of core utils.
-  PROJECT:
-    sh: |
-      while IFS= read -r line; do
-        case "$line" in
-          'packages = ['*) p="${line#*\"}"; printf '%s' "${p%%\"*}"; break ;;
-        esac
-      done < pyproject.toml
+  PROJECT: skill-dojo
 
 tasks:
   default:

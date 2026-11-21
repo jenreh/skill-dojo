@@ -1,0 +1,38 @@
+[project]
+name = "skill-dojo"
+version = "0.0.0"
+description = "Curate agent plugin marketplaces, skills and MCP servers in a git repo."
+readme = "README.md"
+authors = [{ name = "Jens Rehpöhler" }]
+license = { text = "MIT" }
+requires-python = ">=3.14"
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "skill-dojo-core==0.0.0",
+    "typer>=0.29.2",
+]
+
+[project.optional-dependencies]
+web = ["skill-dojo-web~=0.0.0"]
+
+[project.scripts]
+skill-dojo = "skill_dojo_cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/jenreh/skill-dojo"
+Repository = "https://github.com/jenreh/skill-dojo"
+
+[tool.uv.build-backend]
+module-name = "skill_dojo_cli"
+
+[tool.uv.sources]
+skill-dojo-core = { workspace = true }
+skill-dojo-web = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"

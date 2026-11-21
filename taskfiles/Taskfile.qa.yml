@@ -6,11 +6,11 @@ silent: true
 
 vars:
   RUNNER: uv run
-  # App package plus every component source dir (components/*/src).
+  # Every component's sources and tests, plus the cross-package tests.
   SRC_DIRS:
     sh: |
-      printf '%s' "{{.PROJECT}}"
-      for d in components/*/src; do if [ -d "$d" ]; then printf ' %s' "$d"; fi; done
+      printf '%s' "tests conftest.py"
+      for d in components/*/src components/*/tests; do if [ -d "$d" ]; then printf ' %s' "$d"; fi; done
 
 tasks:
   # ----------------------------------------------------------------------------

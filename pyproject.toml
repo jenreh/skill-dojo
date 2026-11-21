@@ -1,26 +1,15 @@
 [project]
-name = "skill-dojo"
+name = "skill-dojo-workspace"
 version = "0.0.0"
-description = "Manages agent plugin marketplaces, skills, and MCP servers in a git repo."
+description = "Workspace root of skill-dojo (not published)."
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 authors = [{ name = "Jens Rehpöhler" }]
-keywords = []
-classifiers = [
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-]
-
 dependencies = [
-    "appkit-user>=1.19.1",
-    "appkit-mantine>=1.19.1",
-    "psycopg[binary,pool]>=3.3.9",
-    "reflex>=0.11.0",
-    "sqlalchemy>=2.1.8",
-    "alembic>=1.20.1",
+    "skill-dojo-core",
+    "skill-dojo[web]",
+    "skill-dojo-web",
 ]
 
 [dependency-groups]
@@ -33,42 +22,62 @@ dev = [
     "pytest-httpserver>=1.2.1",
     "ruff>=0.17.5",
     "ty>=0.0.104",
-    "types-PyYAML>=6.0.12.20261113",
 ]
 
-[project.scripts]
-# skit = "skit.cli.main:app"
-# skit-mcp = "skit.mcp_server.server:main"
+[tool.uv]
+package = false
 
-[project.urls]
-Homepage = "https://github.com/jenreh/skill-dojo"
-Repository = "https://github.com/jenreh/skill-dojo"
+[tool.uv.workspace]
+members = ["components/*"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["app"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "/app",
-    "README.md",
-    "pyproject.toml",
-]
+[tool.uv.sources]
+skill-dojo-core = { workspace = true }
+skill-dojo = { workspace = true }
+skill-dojo-web = { workspace = true }
 
 [tool.bumpversion]
 commit = false
-current_version = "1.0.1"
+current_version = "0.0.0"
 tag = false
 allow-dirty = false
+
+[[tool.bumpversion.files]]
+filename = "components/skill-dojo-core/pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "components/skill-dojo-cli/pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "components/skill-dojo-web/pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+# The CLI pins core exactly; the web extra and web's core pin are compatible
+# releases, so a core + CLI release does not need a web release.
+[[tool.bumpversion.files]]
+filename = "components/skill-dojo-cli/pyproject.toml"
+search = '"skill-dojo-core=={current_version}"'
+replace = '"skill-dojo-core=={new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "components/skill-dojo-cli/pyproject.toml"
+search = '"skill-dojo-web~={current_major}.{current_minor}.0"'
+replace = '"skill-dojo-web~={new_major}.{new_minor}.0"'
+
+[[tool.bumpversion.files]]
+filename = "components/skill-dojo-web/pyproject.toml"
+search = '"skill-dojo-core~={current_major}.{current_minor}.0"'
+replace = '"skill-dojo-core~={new_major}.{new_minor}.0"'
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
 search = 'version = "{current_version}"'
 replace = 'version = "{new_version}"'
 
-[[tool.bumpversion.files]]
-filename = "configuration/config.yaml"
-search = 'version: {current_version}'
-replace = 'version: {new_version}'
 [tool.ruff]
 cache-dir = ".cache/ruff"
 indent-width = 4
@@ -174,6 +183,8 @@ select = [
     "E741",
     "RUF059",
 ]
+# Test helpers run git with fixed arguments.
+"tests/support/*.py" = ["S603", "S607"]
 # Command line scripts print their output and run tools with fixed arguments.
 "{scripts,terraform}/*.py" = ["T201", "S603", "S607"]
 
@@ -187,24 +198,27 @@ docstring-code-line-length = "dynamic"
 exclude = ["*.pyi"]
 
 [tool.ruff.lint.isort]
-known-local-folder = ["app"]
+known-first-party = ["skill_dojo_core", "skill_dojo_cli", "skill_dojo_web"]
 
 [tool.pytest.ini_options]
 cache_dir = ".cache/pytest"
-testpaths = ["tests"]
+testpaths = ["components/skill-dojo-core/tests", "components/skill-dojo-cli/tests", "components/skill-dojo-web/tests", "tests"]
+addopts = "--import-mode=importlib"
+pythonpath = ["."]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 # Type checking with `ty` (Astral). Run via `task typecheck` (uv run ty check).
 [tool.ty.environment]
 python-version = "3.14"
 
 [tool.ty.src]
+include = ["components/skill-dojo-core/src", "components/skill-dojo-cli/src", "components/skill-dojo-web/src", "components/skill-dojo-core/tests", "components/skill-dojo-cli/tests", "components/skill-dojo-web/tests", "tests"]
 exclude = [
     ".agents",
     ".cache",
     ".claude",
     ".venv",
-    "alembic/versions",
     "build",
     "dist",
 ]
@@ -216,7 +230,7 @@ import-not-found = "warn"
 
 [tool.coverage.run]
 branch = true
-source = ["app"]
+source = ["skill_dojo_core", "skill_dojo_cli", "skill_dojo_web"]
 omit = []
 
 [tool.coverage.report]
@@ -224,7 +238,3 @@ exclude_lines = ["if TYPE_CHECKING:", "if __name__ == .__main__.:", "pragma: no 
 fail_under = 80
 show_missing = true
 skip_covered = true
-
-[build-system]
-requires = ["hatchling>=1.33.0"]
-build-backend = "hatchling.build"

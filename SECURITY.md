@@ -7,38 +7,18 @@ this repository, or contact the maintainers directly.
 
 ## Secure defaults
 
-- Secrets come from the secret provider (`.env` locally). `betterleaks` scans every commit
-  and pull request.
+- skill-dojo stores no credentials. Locally it uses `gh auth`; in GitHub Actions the
+  token comes from Actions secrets. `betterleaks` scans every commit and pull request.
 - Dependencies are locked in `uv.lock` and audited by `task audit` and in CI. GitHub
   Actions and pre-commit hooks are pinned to commit SHAs, tool downloads to checksums,
   and Dependabot keeps them current after a 7-day cooldown.
-- The dev container only mounts this project. It gets the host Docker daemon only if
-  you chose `devcontainer_docker`, because that is root access to the host.
-- No default accounts exist. `task admin:bootstrap` creates the first administrator
-  from `mn-admin-email` and `mn-admin-password`, and that password must be changed at
-  first login.
-- Routes are default-deny (`public_routes`). A session is checked for websocket events
-  and page loads, and failed logins are throttled.
-- CORS only allows the origin of `deploy_url`. Responses carry security headers, and
-  the session cookie is `Secure`.
-- The container runs as an unprivileged user without development dependencies.
+- `git` and `gh` are always run with argument lists, never through a shell.
+- The web UI (`skill-dojo serve`) is local only and binds to `127.0.0.1`.
+- The dev container only mounts this project.
 
-## Before you deploy
+## Repository baseline
 
-- [ ] Run with `PROFILES=prod`, and set `mn-server-endpoint` to your public `https://` URL.
-- [ ] Generate a new `mn-db-encryption-key` for every environment. Keep it safe, because
-      encrypted columns cannot be read without it.
-- [ ] Terminate TLS in a reverse proxy, and do not expose the app port directly.
-- [ ] Set `FORWARDED_ALLOW_IPS` to the proxy addresses, and `reflex.trusted_proxy_hops`
-      to the number of proxies. Otherwise all users share one login throttle.
-- [ ] Use `ssl_mode: verify-full` for the database once the server CA is available.
-- [ ] Run `task admin:bootstrap` once, then remove `mn-admin-password` from the
-      environment.
-- [ ] Consider a full `Content-Security-Policy` at the proxy. The app only sets
-      `frame-ancestors`, because Reflex pages need inline scripts.
 - [ ] Check the GitHub baseline: `scripts/github_publish.py` (or `python scripts/github_harden.py`
       for an existing repo) sets up branch protection with the `02 Security checks` jobs
       required, Dependabot, secret scanning with push protection, a CodeQL merge gate,
-      AI Scan and private vulnerability reporting. Its output lists what your plan does
-      not support, and the settings to turn on by hand (malware alerts, automatic
-      dependency submission, scan for AI applications).
+      AI Scan and private vulnerability reporting.
