@@ -32,6 +32,25 @@ only through a reviewed pull request. Status: early development, see
 uv run skill-dojo --help
 ```
 
+## Commands available so far
+
+| Command | What it does |
+| --- | --- |
+| `skill-dojo init [--name] [--repository] [--tool-git SHA \| --tool-version X.Y.Z]` | Scaffold `registry/`, both catalogs and `.github/workflows/validate-marketplace.yml` |
+| `skill-dojo local add plugins/<name> [--category]` | Register a local plugin: item, `lock.json` entry, provenance metadata, catalogs |
+| `skill-dojo lock refresh [--item]` | Recompute the lock entry of a local plugin after an edit |
+| `skill-dojo build [--check]` | Regenerate catalogs, missing manifests, branding, metadata and layout links |
+| `skill-dojo validate` | Agent Plugins / skill checks, untracked folders, drift, floating MCP references |
+
+### Curated repo files
+
+- `registry/config.yaml`: name, namespace, tool pin, layout and branding options
+- `registry/items.yaml`: tracked plugins (`local`, `mirror`, `bundle`)
+- `registry/lock.json`: per item the upstream repo/commit/path, `treeSha256` and per
+  file `sha256` (plus `normalizedSha256` for `SKILL.md` and `plugin.json`, so stamped
+  metadata is never drift)
+- `registry/sources.yaml`, `approvals.yaml`, `channel-policy.yaml`, `clients.yaml`
+
 ## Project Initialization
 
 Before initializing the project, install these required tools:

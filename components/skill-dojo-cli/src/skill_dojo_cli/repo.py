@@ -1,19 +1,53 @@
 """Repo-wide commands: ``init``, ``build``, ``validate``, ``flags``, ``vendor``."""
 
+from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from skill_dojo_core import not_implemented
+import skill_dojo_core as core
+from skill_dojo_cli.context import build_context
+from skill_dojo_cli.output import echo_lines, echo_report
+from skill_dojo_core import InvalidInputError, ToolPin, not_implemented
+
+
+def tool_pin(git_sha: str | None, tool_version: str | None) -> ToolPin:
+    if git_sha and tool_version:
+        raise InvalidInputError("use either --tool-git or --tool-version")
+    if git_sha:
+        return ToolPin(git=git_sha)
+    return ToolPin(version=tool_version or version("skill-dojo"))
 
 
 def init(
+    name: Annotated[
+        str | None, typer.Option(help="Marketplace name (default: folder name).")
+    ] = None,
+    repository: Annotated[
+        str | None, typer.Option(help="owner/name of this repo on GitHub.")
+    ] = None,
+    tool_git: Annotated[
+        str | None, typer.Option(help="Pin skill-dojo to this git commit SHA.")
+    ] = None,
+    tool_version: Annotated[
+        str | None, typer.Option(help="Pin skill-dojo to this PyPI version.")
+    ] = None,
     adopt: Annotated[
         bool, typer.Option(help="Register the existing plugins/ of this repo.")
     ] = False,
 ) -> None:
     """Scaffold a curated marketplace in this repo."""
-    not_implemented("init")
+    if adopt:
+        not_implemented("init --adopt")
+    result = core.init(
+        build_context(Path.cwd()),
+        name=name,
+        tool=tool_pin(tool_git, tool_version),
+        repository=repository,
+    )
+    typer.echo("Created:")
+    echo_lines(result.created)
 
 
 def build(
@@ -22,12 +56,23 @@ def build(
     ] = False,
 ) -> None:
     """Regenerate both catalogs, manifests and the layout."""
-    not_implemented("build")
+    result = core.build(build_context(Path.cwd()), check=check)
+    if not result.changed:
+        typer.echo("Nothing to change.")
+        return
+    typer.echo("Would change:" if check else "Changed:")
+    echo_lines(result.changed)
+    if check:
+        typer.echo("Run 'skill-dojo build' and commit the result.", err=True)
+        raise typer.Exit(1)
 
 
 def validate() -> None:
     """Validate plugins, skills, catalogs and registry/."""
-    not_implemented("validate")
+    report = core.validate(build_context(Path.cwd()))
+    echo_report(report)
+    if not report.ok:
+        raise typer.Exit(1)
 
 
 def flags(

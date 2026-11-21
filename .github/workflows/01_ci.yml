@@ -72,3 +72,12 @@ jobs:
             echo "reflex must not be installed without the web extra" >&2
             exit 1
           fi
+
+      - name: Scaffold and validate a marketplace with the installed CLI
+        run: |
+          mkdir /tmp/marketplace
+          cd /tmp/marketplace
+          git init -q
+          /tmp/cli-venv/bin/skill-dojo init --name ci --tool-version 0.0.0
+          /tmp/cli-venv/bin/skill-dojo validate
+          /tmp/cli-venv/bin/skill-dojo build --check

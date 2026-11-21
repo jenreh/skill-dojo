@@ -33,6 +33,14 @@ def isolated_git(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def isolated_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commands default to the cwd; never let a test run them in this checkout."""
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+
 @pytest.fixture
 def fake_github() -> FakeGitHub:
     return FakeGitHub()
