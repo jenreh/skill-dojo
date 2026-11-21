@@ -32,6 +32,7 @@ class UpstreamPlugin(Result):
     ref: str | None = None
     version: str | None = None
     description: str | None = None
+    unsupported: str | None = None
 
 
 def repo_url(repository: str) -> str:
@@ -64,32 +65,50 @@ def _read_catalog(root: Path, rel: str) -> dict[str, Any]:
     return data
 
 
+REMOTE_KINDS = frozenset({"github", "url", "git", "git-subdir"})
+# Catalog entries that define components inline describe a plugin that exists
+# only in the catalog; vendoring it would mean writing files upstream never had.
+INLINE_KEYS = frozenset(
+    {"commands", "agents", "hooks", "mcpServers", "skills", "lspServers"}
+)
+
+
 def _remote(source: dict[str, Any]) -> tuple[str, str | None, str] | None:
-    """(repository, ref, path) of a remote plugin source entry."""
+    """(repository, ref, path) of a remote plugin source entry; a sha wins."""
     kind = source.get("source")
     repository = source.get("repo") if kind == "github" else source.get("url")
-    if kind not in {"github", "url", "git"} or not isinstance(repository, str):
+    if kind not in REMOTE_KINDS or not isinstance(repository, str):
         return None
-    ref = source.get("ref") or source.get("sha")
+    ref = source.get("sha") or source.get("ref")
     path = source.get("path") or "."
     return repository, ref if isinstance(ref, str) else None, str(path)
 
 
-def _entry(source: Source, entry: dict[str, Any]) -> UpstreamPlugin | None:
+def _entry(
+    source: Source, entry: dict[str, Any], plugin_root: str | None
+) -> UpstreamPlugin | None:
     name = entry.get("name")
     if not isinstance(name, str):
         return None
-    where = entry.get("source")
-    common = {
+    version = entry.get("version")
+    description = entry.get("description")
+    common: dict[str, Any] = {
         "name": name,
-        "version": entry.get("version")
-        if isinstance(entry.get("version"), str)
-        else None,
-        "description": entry.get("description")
-        if isinstance(entry.get("description"), str)
-        else None,
+        "version": version if isinstance(version, str) else None,
+        "description": description if isinstance(description, str) else None,
     }
+    where = entry.get("source")
+    inline = sorted(INLINE_KEYS & set(entry))
+    if entry.get("strict") is False or inline:
+        reason = "defines components in the catalog ({})".format(
+            ", ".join(inline) or "strict: false"
+        )
+        return UpstreamPlugin(
+            path=".", repository=source.repository, unsupported=reason, **common
+        )
     if isinstance(where, str):
+        if plugin_root and not where.startswith(("./", "/")):
+            where = f"{plugin_root.rstrip('/')}/{where}"
         return UpstreamPlugin(
             path=safe_path(where), repository=source.repository, **common
         )
@@ -105,7 +124,16 @@ def _entry(source: Source, entry: dict[str, Any]) -> UpstreamPlugin | None:
             return UpstreamPlugin(
                 path=safe_path(path), repository=repository, ref=ref, **common
             )
-    return None
+        kind = where.get("source")
+        return UpstreamPlugin(
+            path=".",
+            repository=source.repository,
+            unsupported=f"source type '{kind}' cannot be vendored",
+            **common,
+        )
+    return UpstreamPlugin(
+        path=".", repository=source.repository, unsupported="no source", **common
+    )
 
 
 def _manifest(plugin: Path) -> dict[str, Any] | None:
@@ -148,10 +176,18 @@ def list_plugins(source: Source, root: Path) -> list[UpstreamPlugin]:
     elif source.type in DEFAULT_PATHS:
         rel = source.marketplace_path or DEFAULT_PATHS[source.type]
         catalog = _read_catalog(root, rel)
+        metadata = catalog.get("metadata")
+        plugin_root = metadata.get("pluginRoot") if isinstance(metadata, dict) else None
         plugins = [
             p
             for e in catalog["plugins"]
-            if isinstance(e, dict) and (p := _entry(source, e)) is not None
+            if isinstance(e, dict)
+            and (
+                p := _entry(
+                    source, e, plugin_root if isinstance(plugin_root, str) else None
+                )
+            )
+            is not None
         ]
     else:
         raise InvalidInputError(f"source type '{source.type.value}' has no catalog yet")

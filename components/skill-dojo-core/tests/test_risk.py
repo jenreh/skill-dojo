@@ -97,3 +97,34 @@ def test_render() -> None:
     flag = risk.RiskFlag(kind="hook", path="a|b", line=3, detail="x|y")
     text = risk.render([flag])
     assert "| `hook` | `a|b` | 3 | x\\|y |" in text
+
+
+def test_components_in_the_manifest_are_not_metadata_only() -> None:
+    old = {"plugin.json": (F, b'{"name": "p", "version": "1", "license": "MIT"}')}
+    new = {
+        "plugin.json": (
+            F,
+            json.dumps(
+                {
+                    "name": "p",
+                    "version": "2",
+                    "license": "MIT",
+                    "mcpServers": {"x": {"command": "npx", "args": ["x@1.0.0"]}},
+                    "hooks": {"PreToolUse": []},
+                }
+            ).encode(),
+        )
+    }
+    found = kinds(risk.compare(old, new))
+    assert {"mcp-server-added", "hook"} <= found
+    assert "metadata-only" not in found
+
+
+def test_new_skill_or_command_declaring_tools_is_flagged() -> None:
+    new = {
+        "skills/s/SKILL.md": (F, b"---\nname: s\nallowed-tools: Bash\n---\nb\n"),
+        "agents/a.md": (F, b"---\nname: a\ntools: Bash, Write\n---\nb\n"),
+        "LICENSE": (F, b"MIT"),
+    }
+    found = [f for f in risk.compare({}, new) if f.kind == "allowed-tools"]
+    assert {f.path for f in found} == {"skills/s/SKILL.md", "agents/a.md"}

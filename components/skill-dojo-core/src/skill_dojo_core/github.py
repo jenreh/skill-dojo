@@ -48,6 +48,10 @@ class GitHub(Protocol):
 
     def comment(self, number: int, body: str) -> None: ...
 
+    def list_open_pull_requests(self, base: str) -> list[PullRequest]: ...
+
+    def close_pull_request(self, number: int, comment: str) -> None: ...
+
 
 def _pull_request(data: dict[str, Any]) -> PullRequest:
     return PullRequest(
@@ -140,3 +144,22 @@ class GhCli:
 
     def comment(self, number: int, body: str) -> None:
         self.run("pr", "comment", str(number), f"--body={body}")
+
+    def list_open_pull_requests(self, base: str) -> list[PullRequest]:
+        found = json.loads(
+            self.run(
+                "pr",
+                "list",
+                f"--base={base}",
+                "--state=open",
+                "--json",
+                PR_FIELDS,
+                "--limit",
+                "200",
+            )
+            or "[]"
+        )
+        return [_pull_request(item) for item in found]
+
+    def close_pull_request(self, number: int, comment: str) -> None:
+        self.run("pr", "close", str(number), f"--comment={comment}")

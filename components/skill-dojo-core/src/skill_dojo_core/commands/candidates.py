@@ -22,6 +22,7 @@ from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
 from skill_dojo_core.github import PullRequest
 from skill_dojo_core.models import (
+    ITEM_ID_RE,
     Channel,
     Item,
     ItemKind,
@@ -49,6 +50,8 @@ LICENSE_NAMES = (
     "NOTICE.md",
     "COPYING",
 )
+# Repo plumbing that is not part of a plugin at the repo root (its manifest in
+# .claude-plugin/ is still vendored).
 SKIPPED_TOP = frozenset({".git", ".github", ".agents", ".claude-plugin", "registry"})
 MARKER = "<!-- skill-dojo:candidate"
 
@@ -59,7 +62,7 @@ class CandidateResult(Result):
     branch: str
     pull_request: PullRequest | None = None
     flags: list[RiskFlag] = []
-    status: str  # opened | updated | up-to-date | quarantined
+    status: str  # opened | updated | up-to-date | unchanged | quarantined
 
 
 class SyncResult(Result):
@@ -142,6 +145,8 @@ def fetch_plugin(ctx: Context, source: Source, name: str, tmp: Path) -> Fetched:
     plugin = offered.get(name)
     if plugin is None:
         raise NotFoundError(f"source '{source.id}' offers no plugin '{name}'")
+    if plugin.unsupported:
+        raise InvalidInputError(f"'{name}' cannot be mirrored: {plugin.unsupported}")
     if plugin.repository == source.repository:
         return Fetched(tmp / "src", plugin, source.repository, source.ref, commit)
     url = sources.repo_url(plugin.repository)
@@ -152,7 +157,7 @@ def fetch_plugin(ctx: Context, source: Source, name: str, tmp: Path) -> Fetched:
         )
     ref = plugin.ref or "HEAD"
     remote_commit = git.resolve(url, ref, ctx.repo)
-    git.fetch_commit(url, remote_commit, tmp / "plugin")
+    git.fetch_commit(url, remote_commit, tmp / "plugin", credentials_from=ctx.repo)
     return Fetched(tmp / "plugin", plugin, plugin.repository, ref, remote_commit)
 
 
@@ -178,7 +183,7 @@ def upstream_files(fetched: Fetched) -> dict[str, Path]:
         top = PurePosixPath(rel).parts[0]
         if (
             fetched.plugin.path == "."
-            and (top in SKIPPED_TOP or (top not in {"skills"} and "/" in rel))
+            and top in SKIPPED_TOP
             and rel not in hashing.MANIFESTS
         ):
             continue
@@ -244,7 +249,8 @@ def view(repo: Path, start: str) -> Generator[Path]:
 
 
 def staging_start(repo: Path, base: str) -> str:
-    git.run(repo, "fetch", "-q", "origin", base, check=False)
+    if git.remote_branch_exists(repo, base):
+        git.run(repo, "fetch", "-q", "origin", base)
     start = f"origin/{base}"
     if not git.ref_exists(repo, start):
         raise NotFoundError(
@@ -295,6 +301,72 @@ def _changes(old: Tree, new: Tree) -> dict[str, list[str]]:
     }
 
 
+def check_item_id(item_id: str) -> None:
+    if not (1 <= len(item_id) <= 64) or not ITEM_ID_RE.match(item_id):
+        raise InvalidInputError(f"'{item_id}' is not a valid plugin name")
+
+
+@dataclass(frozen=True)
+class Built:
+    flags: list[RiskFlag]
+    body: str
+    unchanged: bool
+
+
+def build_candidate(
+    wt: Path, staged: Registry, item_id: str, source: Source, fetched: Fetched
+) -> Built:
+    """Vendor ``fetched`` into the worktree and build it; nothing is committed."""
+    old = staged.lock.items.get(item_id)
+    files = upstream_files(fetched)
+    check_representable(item_id, files)
+    ns = staged.config.namespace
+    plugin = wt / builder.plugin_dir(item_id)
+    skip = set(old.generated) if old else set()
+    approved = tree_of(plugin, ns, skip) if plugin.is_dir() and old else {}
+    vendor_into(plugin, files)
+    candidate = tree_of(plugin, ns)
+    if old is not None and approved == candidate:
+        return Built(flags=[], body="", unchanged=True)
+    flags = risk.compare(approved, candidate)
+    body = _write_candidate(
+        wt, item_id, source, fetched, approved, candidate, flags, old
+    )
+    return Built(flags=flags, body=body, unchanged=False)
+
+
+def commit_and_push(wt: Path, branch: str, message: str) -> bool:
+    """Commit the worktree (detached) and push it unless the branch already holds
+    the same tree. Returns whether it pushed."""
+    git.run(wt, "add", "-A")
+    # --no-verify: local hooks never run on untrusted upstream content.
+    git.run(wt, "commit", "-q", "--no-verify", "-m", message)
+    tree = git.run(wt, "rev-parse", "HEAD^{tree}")
+    if git.remote_tree(wt, branch) == tree:
+        return False
+    git.run(wt, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{branch}")
+    return True
+
+
+def publish(
+    ctx: Context, item_id: str, *, branch: str, base: str, title: str, body: str
+) -> tuple[PullRequest, str]:
+    """Open or update the candidate PR and close older ones of the same item."""
+    open_pr = ctx.github.find_open_pull_request(branch, base)
+    if open_pr is None:
+        pr, status = ctx.github.open_pull_request(branch, base, title, body), "opened"
+    else:
+        pr = ctx.github.update_pull_request(open_pr.number, title, body)
+        status = "updated"
+    prefix = f"candidate/{item_id}/"
+    for stale in ctx.github.list_open_pull_requests(base):
+        if stale.head.startswith(prefix) and stale.number != pr.number:
+            ctx.github.close_pull_request(
+                stale.number, f"Superseded by {pr.url} (newer upstream commit)."
+            )
+    return pr, status
+
+
 def make_candidate(
     ctx: Context,
     source: Source | None,
@@ -308,6 +380,7 @@ def make_candidate(
     The registry state comes from the base branch (``staging``), not from the
     admin's checkout. ``source`` and ``name`` default to the staged item's.
     """
+    check_item_id(item_id)
     base = base_branch(Registry.load(ctx.repo))
     start = staging_start(ctx.repo, base)
     with view(ctx.repo, start) as wt:
@@ -331,39 +404,17 @@ def make_candidate(
                 return CandidateResult(
                     item=item_id, commit=fetched.commit, branch="", status="up-to-date"
                 )
-            files = upstream_files(fetched)
-            check_representable(item_id, files)
+            built = build_candidate(wt, staged, item_id, source, fetched)
+            if built.unchanged:
+                return CandidateResult(
+                    item=item_id, commit=fetched.commit, branch="", status="unchanged"
+                )
             branch = f"candidate/{item_id}/{fetched.commit[:12]}"
-            git.run(wt, "switch", "-q", "-C", branch)
-            ns = staged.config.namespace
-            plugin = wt / builder.plugin_dir(item_id)
-            skip = set(old.generated) if old else set()
-            approved = tree_of(plugin, ns, skip) if plugin.is_dir() and old else {}
-            vendor_into(plugin, files)
-            candidate = tree_of(plugin, ns)
-            flags = risk.compare(approved, candidate)
-            body = _write_candidate(
-                wt, item_id, source, fetched, approved, candidate, flags, old
-            )
-            git.run(wt, "add", "-A")
-            # --no-verify: local hooks never run on untrusted upstream content.
-            git.run(
-                wt,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                f"candidate: {item_id} {fetched.commit[:12]}",
-            )
-            git.run(wt, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{branch}")
+            commit_and_push(wt, branch, f"candidate: {item_id} {fetched.commit[:12]}")
     title = f"candidate: {item_id} @ {fetched.commit[:12]}"
-    open_pr = ctx.github.find_open_pull_request(branch, base)
-    if open_pr is None:
-        pr = ctx.github.open_pull_request(branch, base, title, body)
-        status = "opened"
-    else:
-        pr = ctx.github.update_pull_request(open_pr.number, title, body)
-        status = "updated"
+    pr, status = publish(
+        ctx, item_id, branch=branch, base=base, title=title, body=built.body
+    )
     ctx.report(f"{status} candidate {item_id} -> {pr.url}")
     log.info("Candidate %s %s: %s", item_id, status, pr.url)
     return CandidateResult(
@@ -371,9 +422,20 @@ def make_candidate(
         commit=fetched.commit,
         branch=branch,
         pull_request=pr,
-        flags=flags,
+        flags=built.flags,
         status=status,
     )
+
+
+def _manifest_version(root: Path) -> str | None:
+    for rel in hashing.MANIFESTS:
+        try:
+            data = json.loads((root / rel).read_text(encoding="utf-8"))
+        except OSError, UnicodeDecodeError, ValueError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("version"), str):
+            return data["version"]
+    return None
 
 
 def _write_candidate(  # noqa: PLR0917
@@ -405,7 +467,7 @@ def _write_candidate(  # noqa: PLR0917
     files = hashing.hash_tree(root, reg.config.namespace)
     reg.lock.items[item_id] = ItemLock(
         kind=ItemKind.MIRROR,
-        version=fetched.plugin.version,
+        version=fetched.plugin.version or _manifest_version(root),
         upstream=Upstream(
             repository=fetched.repository,
             commit=fetched.commit,

@@ -35,6 +35,7 @@ def test_catalog_entries(tmp_path: Path) -> None:
         tmp_path,
         ".claude-plugin/marketplace.json",
         {
+            "metadata": {"pluginRoot": "./packs"},
             "plugins": [
                 {"name": "a", "source": "./plugins/a", "version": "1"},
                 {
@@ -46,14 +47,31 @@ def test_catalog_entries(tmp_path: Path) -> None:
                     "source": {"source": "url", "url": "https://x.invalid/c.git"},
                 },
                 {"name": "d", "source": {"source": "npm"}},
+                {"name": "e", "source": "./plugins/e", "strict": False, "commands": []},
+                {
+                    "name": "f",
+                    "source": {
+                        "source": "github",
+                        "repo": "o/f",
+                        "ref": "main",
+                        "sha": "a" * 40,
+                    },
+                },
+                {"name": "g", "source": "g-plugin"},
+                {"name": "h"},
                 {"source": "./x"},
                 "junk",
-            ]
+            ],
         },
     )
     source = Source(id="s", type=SourceType.CLAUDE_MARKETPLACE, repository="o/r")
     found = {p.name: p for p in sources.list_plugins(source, tmp_path)}
-    assert set(found) == {"a", "b", "c"}
+    assert set(found) == {"a", "b", "c", "d", "e", "f", "g", "h"}
+    assert "npm" in (found["d"].unsupported or "")
+    assert "commands" in (found["e"].unsupported or "")
+    assert found["f"].ref == "a" * 40
+    assert found["g"].path == "packs/g-plugin"
+    assert found["h"].unsupported == "no source"
     assert found["a"].repository == "o/r"
     assert (found["b"].repository, found["b"].ref) == ("o/b", "v1")
     allow = source.model_copy(update={"allowlist": ["a"]})

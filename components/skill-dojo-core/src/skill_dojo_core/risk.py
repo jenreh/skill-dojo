@@ -22,6 +22,44 @@ MCP_FILES = frozenset({"mcp.json", ".mcp.json"})
 MANIFESTS = frozenset({"plugin.json", ".claude-plugin/plugin.json"})
 LICENSE_RE = re.compile(r"(?:^|/)(?:LICEN[CS]E|NOTICE|COPYING)(?:\.[A-Za-z]+)?$", re.I)
 SERVER_KEYS = ("type", "command", "args", "env", "url", "headers", "cwd")
+# Manifest keys that only describe a plugin; anything else changes behaviour.
+DESCRIPTIVE_MANIFEST_KEYS = frozenset(
+    {
+        "$schema",
+        "name",
+        "displayName",
+        "version",
+        "description",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+    }
+)
+DESCRIPTIVE_FRONTMATTER_KEYS = frozenset(
+    {
+        "name",
+        "description",
+        "when_to_use",
+        "license",
+        "metadata",
+        "argument-hint",
+        "version",
+    }
+)
+COMPONENT_KEYS = (
+    "mcpServers",
+    "hooks",
+    "commands",
+    "agents",
+    "skills",
+    "lspServers",
+    "outputStyles",
+    "permissions",
+)
+TOOL_KEYS = ("allowed-tools", "allowedTools", "tools")
+TOOL_DIRS = frozenset({"skills", "commands", "agents"})
 
 
 class RiskFlag(Result):
@@ -182,16 +220,59 @@ def file_flags(
         flags += mcp_flags(path, old[1] if old else None, data)
     old_text = _text(old[1]) if old else ""
     flags += text_flags(path, old_text or "", text)
-    if PurePosixPath(path).name == "SKILL.md" and old is not None:
-        before = _frontmatter(old[1]).get("allowed-tools")
-        after = _frontmatter(data).get("allowed-tools")
-        if before != after:
+    if path in MANIFESTS:
+        flags += manifest_flags(path, old[1] if old else None, data)
+    if path.endswith(".md") and parts and parts[0] in TOOL_DIRS:
+        flags += tool_flags(path, old[1] if old else None, data, text)
+    return flags
+
+
+def tool_flags(path: str, old: bytes | None, new: bytes, text: str) -> list[RiskFlag]:
+    """New or changed tool permissions in a skill, command or agent file."""
+    before = _frontmatter(old) if old is not None else {}
+    after = _frontmatter(new)
+    return [
+        RiskFlag(
+            kind="allowed-tools",
+            path=path,
+            line=_line_of(text, key),
+            detail=f"{key} {'set' if key not in before else 'changed'} "
+            f"to {after[key]!r}",
+        )
+        for key in TOOL_KEYS
+        if key in after and after.get(key) != before.get(key)
+    ]
+
+
+def manifest_flags(path: str, old: bytes | None, new: bytes) -> list[RiskFlag]:
+    """Components (MCP servers, hooks, commands, ...) declared in a manifest."""
+    before = _json(old) if old is not None else {}
+    after = _json(new)
+    if not isinstance(after, dict):
+        return []
+    before = before if isinstance(before, dict) else {}
+    text = _text(new) or ""
+    flags = []
+    if isinstance(after.get("mcpServers"), dict) or isinstance(
+        before.get("mcpServers"), dict
+    ):
+        servers = {"mcpServers": after.get("mcpServers") or {}}
+        old_servers = {"mcpServers": before.get("mcpServers") or {}}
+        flags += mcp_flags(
+            path,
+            json.dumps(old_servers).encode(),
+            json.dumps(servers).encode(),
+        )
+    for key in COMPONENT_KEYS:
+        if key == "mcpServers" and isinstance(after.get(key), dict):
+            continue
+        if after.get(key) != before.get(key) and (key in after or key in before):
             flags.append(
                 RiskFlag(
-                    kind="allowed-tools",
+                    kind="hook" if key == "hooks" else "manifest-component",
                     path=path,
-                    line=_line_of(text, "allowed-tools"),
-                    detail=f"allowed-tools changed to {after!r}",
+                    line=_line_of(text, f'"{key}"'),
+                    detail=f"manifest '{key}' {'added' if key not in before else 'changed'}",
                 )
             )
     return flags
@@ -210,31 +291,25 @@ def _has_license_file(tree: Tree) -> bool:
     return any(LICENSE_RE.search(rel) for rel in tree)
 
 
-def _strip_namespace(data: bytes, rel: str, prefixes: tuple[str, str]) -> Any:
-    """Content of a manifest or SKILL.md without the tool's own keys."""
+def _descriptive_change(rel: str, old: bytes, new: bytes) -> bool:
+    """True when only descriptive keys differ (and a SKILL.md body is unchanged)."""
     if rel in MANIFESTS:
-        parsed = _json(data)
-        if isinstance(parsed, dict):
-            ext = dict(parsed.get("extensions") or {})
-            ext.pop(prefixes[1], None)
-            return {**parsed, "extensions": ext}
-        return data
-    parsed = _frontmatter(data)
-    metadata = {
-        k: v
-        for k, v in (parsed.get("metadata") or {}).items()
-        if not str(k).startswith(prefixes[0])
-    }
-    return {**parsed, "metadata": metadata}
+        a, b = _json(old), _json(new)
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return False
+        keys = (set(a) | set(b)) - DESCRIPTIVE_MANIFEST_KEYS
+        return all(a.get(k) == b.get(k) for k in keys)
+    if _body((F_MODE, old)) != _body((F_MODE, new)):
+        return False
+    a, b = _frontmatter(old), _frontmatter(new)
+    keys = (set(a) | set(b)) - DESCRIPTIVE_FRONTMATTER_KEYS
+    return all(a.get(k) == b.get(k) for k in keys)
 
 
-def compare(
-    approved: Tree, candidate: Tree, prefixes: tuple[str, str] = ("", "")
-) -> list[RiskFlag]:
+def compare(approved: Tree, candidate: Tree) -> list[RiskFlag]:
     """All risk flags of ``candidate`` against ``approved``.
 
-    ``prefixes`` are the tool's (skill, plugin) namespaces, ignored when deciding
-    whether an upstream change touched only metadata.
+    Both trees are expected without the tool's own provenance keys.
     """
     flags: list[RiskFlag] = []
     changed = [
@@ -263,25 +338,29 @@ def compare(
         for rel in changed
         if rel in MANIFESTS or PurePosixPath(rel).name == "SKILL.md"
     ]
-    if approved and changed and len(metadata_files) == len(changed) and not removed:
-        only_metadata = all(
-            _body(approved.get(rel)) == _body(candidate[rel]) for rel in metadata_files
+    if (
+        approved
+        and changed
+        and not flags
+        and not removed
+        and len(metadata_files) == len(changed)
+        and all(rel in approved for rel in changed)
+        and all(
+            _descriptive_change(rel, approved[rel][1], candidate[rel][1])
+            for rel in changed
         )
-        real = any(
-            _strip_namespace(approved[rel][1], rel, prefixes)
-            != _strip_namespace(candidate[rel][1], rel, prefixes)
-            for rel in metadata_files
-            if rel in approved
-        )
-        if only_metadata and real:
-            flags.append(
-                RiskFlag(
-                    kind="metadata-only",
-                    path=".",
-                    detail="upstream changed only manifest or frontmatter metadata",
-                )
+    ):
+        flags.append(
+            RiskFlag(
+                kind="metadata-only",
+                path=".",
+                detail="upstream changed only descriptive manifest or frontmatter keys",
             )
+        )
     return flags
+
+
+F_MODE = "100644"
 
 
 def _body(entry: tuple[str, bytes] | None) -> str | None:

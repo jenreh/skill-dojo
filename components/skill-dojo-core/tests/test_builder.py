@@ -137,3 +137,10 @@ def test_flat_skills_conflicts(tmp_path: Path) -> None:
     )
     with pytest.raises(InvalidInputError, match="two plugins"):
         builder.flat_skills(Registry.load(tmp_path), Overlay(tmp_path))
+
+
+def test_auth_config_forwards_checkout_header(tmp_path: Path) -> None:
+    git.run(tmp_path, "init", "-q")
+    key = "http.https://github.com/.extraheader"
+    git.run(tmp_path, "config", key, "AUTHORIZATION: basic dGVzdA==")
+    assert git.auth_config(tmp_path) == ["-c", f"{key}=AUTHORIZATION: basic dGVzdA=="]

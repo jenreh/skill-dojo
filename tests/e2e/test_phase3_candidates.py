@@ -333,3 +333,86 @@ def test_catalog_cannot_point_a_remote_source_at_local_repos(
     source_add(admin, "hub", "acme/hub")
     with pytest.raises(InvalidInputError, match="local repository"):
         mirror(admin, "hub", "far")
+
+
+def remote_sha(ctx: Context, branch: str) -> str:
+    return git(ctx.repo, "ls-remote", "origin", f"refs/heads/{branch}").split()[0]
+
+
+def test_open_candidate_is_not_rewritten_and_no_local_branches(
+    admin: Context, fixture_repos: FixtureRepos, fake_github: FakeGitHub
+) -> None:
+    ap = fixture_repos.agent_plugins_marketplace()
+    add_sources(admin, ap, fixture_repos.claude_marketplace())
+    merge(admin, mirror(admin, "ap", "hello").branch)
+    ap.commit({"plugins/hello/NOTES.md": "new\n"})
+    first = sync(admin).candidates[0]
+    pushed = remote_sha(admin, first.branch)
+    again = sync(admin).candidates[0]
+    assert again.status == "updated"
+    assert remote_sha(admin, first.branch) == pushed
+    assert git(admin.repo, "branch", "--list", "candidate/*") == ""
+    ap.commit({"plugins/hello/NOTES.md": "newer\n"})
+    newer = sync(admin).candidates[0]
+    assert newer.branch != first.branch
+    assert first.pull_request is not None
+    assert fake_github.get(first.pull_request.number).state == "CLOSED"
+
+
+def test_upstream_commit_without_plugin_change_is_unchanged(
+    admin: Context, fixture_repos: FixtureRepos
+) -> None:
+    ap = fixture_repos.agent_plugins_marketplace()
+    add_sources(admin, ap, fixture_repos.claude_marketplace())
+    merge(admin, mirror(admin, "ap", "hello").branch)
+    ap.commit({"README.md": "unrelated\n"})
+    assert sync(admin).candidates[0].status == "unchanged"
+
+
+def test_root_plugin_keeps_commands_agents_and_hooks(
+    admin: Context, fixture_repos: FixtureRepos
+) -> None:
+    catalog = {"name": "root", "plugins": [{"name": "rooty", "source": "./"}]}
+    manifest = {"name": "rooty", "version": "1.0.0", "description": "Root plugin."}
+    root = fixture_repos.create(
+        "rooty",
+        {
+            ".claude-plugin/marketplace.json": json.dumps(catalog),
+            ".claude-plugin/plugin.json": json.dumps(manifest),
+            "commands/go.md": "Go.\n",
+            "agents/helper.md": "---\nname: helper\n---\nHelp.\n",
+            "hooks/hooks.json": "{}",
+            "LICENSE": "MIT\n",
+            ".github/workflows/ci.yml": "x: 1\n",
+        },
+    )
+    source_add(admin, "root", root.url, kind=SourceType.CLAUDE_MARKETPLACE)
+    result = mirror(admin, "root", "rooty")
+    files = git(admin.repo, "ls-tree", "-r", "--name-only", f"origin/{result.branch}")
+    for path in ("commands/go.md", "agents/helper.md", "hooks/hooks.json", "LICENSE"):
+        assert f"plugins/rooty/{path}" in files
+    assert "plugins/rooty/.github" not in files
+    assert "plugins/rooty/.claude-plugin/marketplace.json" not in files
+    assert "hook" in {f.kind for f in result.flags}
+
+
+def test_bad_item_id_is_rejected_before_any_write(
+    admin: Context, fixture_repos: FixtureRepos
+) -> None:
+    ap = fixture_repos.agent_plugins_marketplace()
+    source_add(admin, "ap", ap.url)
+    with pytest.raises(InvalidInputError, match="valid plugin name"):
+        mirror(admin, "ap", "hello", item_id="../../escape")
+
+
+def test_unsupported_catalog_entry_has_a_clear_error(
+    admin: Context, fixture_repos: FixtureRepos
+) -> None:
+    catalog = {"name": "c", "plugins": [{"name": "pkg", "source": {"source": "npm"}}]}
+    repo = fixture_repos.create(
+        "npmish", {".claude-plugin/marketplace.json": json.dumps(catalog)}
+    )
+    source_add(admin, "npm", repo.url, kind=SourceType.CLAUDE_MARKETPLACE)
+    assert browse(admin, "npm").plugins[0].unsupported
+    with pytest.raises(InvalidInputError, match="cannot be mirrored"):
+        mirror(admin, "npm", "pkg")

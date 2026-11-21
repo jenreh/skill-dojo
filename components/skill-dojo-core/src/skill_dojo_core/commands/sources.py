@@ -97,7 +97,7 @@ def checkout_source(ctx: Context, source: Source, dest: Path) -> str:
     """Fetch ``source`` at its ref into ``dest``; returns the commit."""
     url = sources.repo_url(source.repository)
     commit = git.resolve(url, source.ref, ctx.repo)
-    git.fetch_commit(url, commit, dest)
+    git.fetch_commit(url, commit, dest, credentials_from=ctx.repo)
     return commit
 
 

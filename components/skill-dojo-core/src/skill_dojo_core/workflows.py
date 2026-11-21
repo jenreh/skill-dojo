@@ -109,7 +109,7 @@ on:
   workflow_dispatch:
     inputs:
       item:
-        description: Only this item (empty = all mirrors and bundles)
+        description: Only this item (empty = all mirrors)
         required: false
 
 permissions:

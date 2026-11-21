@@ -56,3 +56,10 @@ class FakeGitHub:
 
     def get(self, number: int) -> PullRequest:
         return next(p for p in self.pulls if p.number == number)
+
+    def list_open_pull_requests(self, base: str) -> list[PullRequest]:
+        return [p for p in self.pulls if p.base == base and p.state == "OPEN"]
+
+    def close_pull_request(self, number: int, comment: str) -> None:
+        self.comment(number, comment)
+        self._replace(self.get(number).model_copy(update={"state": "CLOSED"}))

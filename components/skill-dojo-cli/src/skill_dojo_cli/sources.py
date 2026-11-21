@@ -64,4 +64,5 @@ def browse(source_id: str) -> None:
     for plugin in result.plugins:
         version = f" {plugin.version}" if plugin.version else ""
         where = f" ({plugin.repository})" if plugin.repository != result.source else ""
-        typer.echo(f"  {plugin.name}{version}  {plugin.path}{where}")
+        note = f"  [cannot mirror: {plugin.unsupported}]" if plugin.unsupported else ""
+        typer.echo(f"  {plugin.name}{version}  {plugin.path}{where}{note}")

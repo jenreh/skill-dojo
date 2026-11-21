@@ -49,12 +49,41 @@ def resolve(url: str, ref: str, cwd: Path) -> str:
     raise ExternalToolError(f"ref '{ref}' not found in {url}")
 
 
-def fetch_commit(url: str, commit: str, dest: Path) -> Path:
+def auth_config(repo: Path) -> list[str]:
+    """``-c`` options carrying the HTTP auth header ``actions/checkout`` set.
+
+    A fresh fetch repo has no credentials; private upstreams then use the same
+    token as the curated repo (design: "Private upstreams use the same token").
+    """
+    out = run(repo, "config", "--get-regexp", r"^http\..*\.extraheader$", check=False)
+    options = []
+    for line in out.splitlines():
+        key, _, value = line.partition(" ")
+        if key and value:
+            options += ["-c", f"{key}={value}"]
+    return options
+
+
+def fetch_commit(
+    url: str, commit: str, dest: Path, *, credentials_from: Path | None = None
+) -> Path:
     """A checkout of exactly ``commit`` of ``url`` in ``dest`` (shallow, partial)."""
     dest.mkdir(parents=True, exist_ok=True)
+    auth = auth_config(credentials_from) if credentials_from else []
     run(dest, "init", "-q")
-    run(dest, "fetch", "-q", "--depth", "1", "--filter=blob:none", "--", url, commit)
-    run(dest, "-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD")
+    run(
+        dest,
+        *auth,
+        "fetch",
+        "-q",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "--",
+        url,
+        commit,
+    )
+    run(dest, *auth, "-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD")
     head_commit = head(dest)
     if head_commit != commit:
         raise ExternalToolError(f"fetched {head_commit}, expected {commit}")
@@ -95,6 +124,25 @@ def show_blob(repo: Path, sha: str) -> bytes:
     if proc.returncode != 0:
         raise ExternalToolError(f"git cat-file failed for {sha}")
     return proc.stdout
+
+
+def remote_branch_exists(repo: Path, branch: str) -> bool:
+    """Whether ``origin`` has ``branch`` (network errors raise)."""
+    return bool(run(repo, "ls-remote", "--heads", "origin", branch))
+
+
+def remote_tree(repo: Path, branch: str) -> str | None:
+    """Tree SHA of ``origin/<branch>`` after fetching it, or None if absent."""
+    if not remote_branch_exists(repo, branch):
+        return None
+    run(
+        repo,
+        "fetch",
+        "-q",
+        "origin",
+        f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+    )
+    return run(repo, "rev-parse", f"origin/{branch}^{{tree}}")
 
 
 def ref_exists(repo: Path, ref: str) -> bool:
