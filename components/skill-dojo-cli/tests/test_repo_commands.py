@@ -121,7 +121,7 @@ def test_source_mirror_sync_flags_commands(
     assert "hello" in invoke("browse", "ap").output
     mirrored = invoke("mirror", "ap", "hello")
     assert "hello: opened" in mirrored.output
-    assert "No mirrors to sync" in invoke("sync").output
+    assert "No mirrors or bundles to sync" in invoke("sync").output
     assert "## Risk flags" in invoke("flags").output
     invoke("source", "add", "spare", ap.url)
     assert "Removed" in invoke("source", "remove", "spare").output

@@ -9,6 +9,7 @@ from skill_dojo_core.builder import (
     CLAUDE_MANIFEST,
     PLUGINS_DIR,
     ROOT_MANIFEST,
+    approval_for,
     is_generated,
     plugin_dir,
     provenance,
@@ -19,8 +20,24 @@ from skill_dojo_core.validation.report import Collector
 from skill_dojo_core.validation.skills import skill_folders
 
 # Fields whose stamped value must equal what lock.json and items.yaml say.
-EXTENSION_FIELDS = ("registryId", "kind", "upstreamCommit", "sourceDigest")
-SKILL_FIELDS = ("id", "kind", "source-commit", "source-digest")
+EXTENSION_FIELDS = (
+    "registryId",
+    "kind",
+    "upstreamCommit",
+    "sourceDigest",
+    "approvedBy",
+    "approvedAt",
+    "reviewEvidence",
+)
+SKILL_FIELDS = (
+    "id",
+    "kind",
+    "source-commit",
+    "source-digest",
+    "approved-by",
+    "approved-at",
+    "review-evidence",
+)
 
 
 def check_tracking(reg: Registry, rep: Collector) -> None:
@@ -113,7 +130,9 @@ def check_provenance(reg: Registry, item: Item, lock: ItemLock, rep: Collector) 
         if not isinstance(data, dict):
             continue
         manifest = manifest or data
-        expected = provenance(reg.config, reg.policy, item, lock, data)
+        expected = provenance(
+            reg.config, reg.policy, item, lock, data, approval=approval_for(reg, item)
+        )
         _compare(
             f"{plugin_dir(item.id)}/{rel}",
             metadata.read_extension(path, ns),
@@ -129,7 +148,15 @@ def check_provenance(reg: Registry, item: Item, lock: ItemLock, rep: Collector) 
             stamped = metadata.read_skill_metadata(skill_md, ns)
         except ValueError:
             continue
-        expected = provenance(reg.config, reg.policy, item, lock, manifest, folder.name)
+        expected = provenance(
+            reg.config,
+            reg.policy,
+            item,
+            lock,
+            manifest,
+            folder.name,
+            approval=approval_for(reg, item),
+        )
         prefixed = expected.skill_metadata(ns.skill)
         plain = {k[len(ns.skill) :]: v for k, v in prefixed.items()}
         _compare(

@@ -114,6 +114,15 @@ def test_merge_replaces_unmatched_lists() -> None:
     assert registry.dump_yaml(merged) == "a: [3]\nc: 1\n"
 
 
+def test_merge_does_not_match_lists_by_a_repeated_key() -> None:
+    raw = registry.yaml_rt().load("a:\n  - item: x\n    n: 1\n")
+    new = {"a": [{"item": "x", "n": 1}, {"item": "x", "n": 2}]}
+    text = registry.dump_yaml(registry.merge(raw, new))
+    assert "&" not in text
+    assert text.count("item: x") == 2
+    assert "n: 2" in text
+
+
 def test_models_validate_pins() -> None:
     with pytest.raises(ValueError, match="exactly one"):
         ToolPin()

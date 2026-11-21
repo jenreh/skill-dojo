@@ -1,20 +1,56 @@
-"""An in-memory ``GitHub`` for tests. Git stays real; only the GitHub API is fake."""
+"""An in-memory ``GitHub`` for tests. Git stays real; only the GitHub API is fake.
 
+With ``remote`` set (a bare repo), ``merge`` does what GitHub does: a merge
+commit of the head branch into the base branch, pushed to the remote.
+"""
+
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from skill_dojo_core.github import PullRequest
+from skill_dojo_core.github import PullRequest, Review
+
+MERGED_AT = "2026-11-21T11:00:00Z"
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 @dataclass
 class FakeGitHub:
     user: str = "alice"
+    remote: Path | None = None
     calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     pulls: list[PullRequest] = field(default_factory=list)
     comments: dict[int, list[str]] = field(default_factory=dict)
+    review_log: dict[int, list[Review]] = field(default_factory=dict)
+    blocked: set[int] = field(default_factory=set)
 
     def current_user(self) -> str:
         self.calls.append(("current_user", ()))
         return self.user
+
+    def _head_oid(self, head: str) -> str | None:
+        if self.remote is None:
+            return None
+        out = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/heads/{head}"],
+            cwd=self.remote,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return out.stdout.strip() or None
+
+    def _live(self, pr: PullRequest) -> PullRequest:
+        """An open PR's head follows its branch, as on GitHub."""
+        if pr.state != "OPEN" or pr.cross_repository:
+            return pr
+        return pr.model_copy(update={"head_oid": self._head_oid(pr.head)})
 
     def _replace(self, pr: PullRequest) -> PullRequest:
         self.pulls = [pr if p.number == pr.number else p for p in self.pulls]
@@ -25,7 +61,10 @@ class FakeGitHub:
             (
                 p
                 for p in self.pulls
-                if p.head == head and p.base == base and p.state == "OPEN"
+                if p.head == head
+                and p.base == base
+                and p.state == "OPEN"
+                and not p.cross_repository
             ),
             None,
         )
@@ -41,6 +80,7 @@ class FakeGitHub:
             body=body,
             head=head,
             base=base,
+            author=self.user,
         )
         self.pulls.append(pr)
         self.calls.append(("open_pull_request", (head, base)))
@@ -55,11 +95,99 @@ class FakeGitHub:
         self.comments.setdefault(number, []).append(body)
 
     def get(self, number: int) -> PullRequest:
-        return next(p for p in self.pulls if p.number == number)
+        return self._live(next(p for p in self.pulls if p.number == number))
+
+    def open_fork_pull_request(self, head: str, base: str) -> PullRequest:
+        """A PR from someone's fork whose branch happens to have ``head``'s name."""
+        pr = self.open_pull_request(head, base, "fork", "")
+        return self._replace(
+            pr.model_copy(
+                update={
+                    "cross_repository": True,
+                    "author": "mallory",
+                    "head_oid": "f" * 40,
+                }
+            )
+        )
+
+    def get_pull_request(self, number: int) -> PullRequest:
+        return self.get(number)
 
     def list_open_pull_requests(self, base: str) -> list[PullRequest]:
-        return [p for p in self.pulls if p.base == base and p.state == "OPEN"]
+        return [
+            self._live(p) for p in self.pulls if p.base == base and p.state == "OPEN"
+        ]
+
+    def list_merged_pull_requests(self, base: str) -> list[PullRequest]:
+        merged = [p for p in self.pulls if p.base == base and p.state == "MERGED"]
+        return list(reversed(merged))
 
     def close_pull_request(self, number: int, comment: str) -> None:
         self.comment(number, comment)
         self._replace(self.get(number).model_copy(update={"state": "CLOSED"}))
+
+    def reviews(self, number: int) -> list[Review]:
+        latest: dict[str, Review] = {}
+        for review in self.review_log.get(number, []):
+            latest[review.user] = review
+        return list(latest.values())
+
+    def add_review(self, number: int, user: str, state: str = "APPROVED") -> None:
+        self.review_log.setdefault(number, []).append(
+            Review(
+                user=user,
+                state=state,
+                submitted_at="2026-11-21T10:30:00Z",
+                commit=self.get(number).head_oid,
+            )
+        )
+
+    def approve(self, number: int, body: str) -> None:
+        self.calls.append(("approve", (number, body)))
+        self.add_review(number, self.user)
+
+    def merge(
+        self, number: int, head_oid: str | None = None, *, merged_by: str | None = None
+    ) -> bool:
+        self.calls.append(("merge", (number,)))
+        if number in self.blocked:
+            return False
+        pr = self.get(number)
+        assert pr.state == "OPEN", f"PR {number} is {pr.state}"
+        assert head_oid is None or head_oid == pr.head_oid, "head moved"
+        assert self.remote is not None, "FakeGitHub.remote is not set"
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "w"
+            _git(Path(tmp), "clone", "-q", str(self.remote), str(work))
+            _git(work, "checkout", "-q", pr.base)
+            _git(
+                work,
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                f"Merge pull request #{number} from {pr.head}",
+                f"origin/{pr.head}",
+            )
+            _git(work, "push", "-q", "origin", f"HEAD:{pr.base}")
+            commit = _git(work, "rev-parse", "HEAD")
+        self._replace(
+            pr.model_copy(
+                update={
+                    "state": "MERGED",
+                    "merged_at": MERGED_AT,
+                    "merge_commit": commit,
+                    "merged_by": merged_by or self.user,
+                    "head_oid": pr.head_oid,
+                }
+            )
+        )
+        return True
+
+    def merge_on_github(
+        self, number: int, reviewers: list[str], merged_by: str = "carol"
+    ) -> None:
+        """Someone reviews and merges on github.com, without the tool."""
+        for reviewer in reviewers:
+            self.add_review(number, reviewer)
+        assert self.merge(number, merged_by=merged_by)

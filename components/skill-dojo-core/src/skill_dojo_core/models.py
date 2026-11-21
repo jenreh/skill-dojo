@@ -24,6 +24,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 ITEM_ID_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 DNS_LABEL_RE = re.compile(r"[^a-z0-9-]+")
+PART_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class ItemKind(StrEnum):
@@ -199,13 +200,34 @@ class SourcesFile(YamlModel):
 # --- registry/items.yaml ----------------------------------------------------
 
 
+def _part_name(value: str) -> str:
+    if not PART_NAME_RE.match(value) or ".." in value:
+        raise ValueError(f"'{value}' is not a valid part name")
+    return value
+
+
+def _relative_path(value: str) -> str:
+    """A plain relative path: no absolute path, no ``..``, no empty parts."""
+    parts = value.split("/")
+    if (
+        value.startswith("/")
+        or "\\" in value
+        or any(p in {"", ".", ".."} for p in parts)
+    ):
+        raise ValueError(f"'{value}' is not a plain relative path")
+    return value
+
+
+RelativePath = Annotated[str, AfterValidator(_relative_path)]
+
+
 class Part(YamlModel):
     """One skill, agent or MCP server inside a bundle."""
 
     kind: Literal["skill", "agent", "mcp_server"]
-    name: str
-    source: str | None = None
-    upstream_plugin: str | None = None
+    name: Annotated[str, AfterValidator(_part_name)]
+    source: ItemId | None = None
+    upstream_plugin: ItemId | None = None
     ref: str | None = None
     commit: str | None = None
 
@@ -257,6 +279,9 @@ class Approval(YamlModel):
     item: str
     version: str | None = None
     commit: str | None = None
+    digest: str | None = Field(
+        default=None, description="treeSha256 of the item as it was approved"
+    )
     pull_request: str
     reviewers: list[str] = Field(default_factory=list)
     approved_at: str
@@ -266,6 +291,11 @@ class Approval(YamlModel):
 
 class ApprovalsFile(YamlModel):
     approvals: list[Approval] = Field(default_factory=list)
+
+    def for_digest(self, item: str, digest: str) -> Approval | None:
+        """The newest approval of ``item`` with exactly this content."""
+        found = [a for a in self.approvals if a.item == item and a.digest == digest]
+        return max(found, key=lambda a: a.approved_at) if found else None
 
 
 # --- registry/channel-policy.yaml -------------------------------------------
@@ -334,6 +364,9 @@ class Upstream(CamelModel):
     path: str
     ref: str | None = None
     plugin: str | None = None
+    license: str | None = Field(
+        default=None, description="License the upstream manifest declares"
+    )
 
 
 class PartLock(CamelModel):
@@ -350,7 +383,7 @@ class ItemLock(CamelModel):
     parts: list[PartLock] = Field(default_factory=list)
     tree_sha256: Sha256
     files: dict[str, FileLock]
-    generated: list[str] = Field(
+    generated: list[RelativePath] = Field(
         default_factory=list,
         description="Paths build generated (not upstream content, not hashed)",
     )

@@ -11,19 +11,24 @@ import logging
 import posixpath
 import shutil
 import tempfile
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from skill_dojo_core import builder, frontmatter, git, hashing, jsontext, risk, sources
+from skill_dojo_core.branches import (
+    base_branch,
+    candidate_branch,
+    commit_and_push,
+    open_or_update,
+    remote_start,
+    view,
+)
 from skill_dojo_core.commands.sources import checkout_source, get_source
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
 from skill_dojo_core.github import PullRequest
 from skill_dojo_core.models import (
     ITEM_ID_RE,
-    Channel,
     Item,
     ItemKind,
     ItemLock,
@@ -65,10 +70,6 @@ class CandidateResult(Result):
     status: str  # opened | updated | up-to-date | unchanged | quarantined
 
 
-class SyncResult(Result):
-    candidates: list[CandidateResult]
-
-
 class FlagsResult(Result):
     base: str
     flags: dict[str, list[RiskFlag]]
@@ -84,11 +85,6 @@ class Fetched:
     repository: str
     ref: str
     commit: str
-
-
-def base_branch(reg: Registry) -> str:
-    rule = reg.policy.channels.get(Channel.BETA)
-    return rule.branch if rule else "staging"
 
 
 # --- trees ------------------------------------------------------------------
@@ -236,30 +232,6 @@ def vendor_into(dest: Path, files: dict[str, Path]) -> None:
 # --- the candidate branch --------------------------------------------------------
 
 
-@contextmanager
-def view(repo: Path, start: str) -> Generator[Path]:
-    """A throwaway detached worktree of ``repo`` at ``start``."""
-    with tempfile.TemporaryDirectory(prefix="skill-dojo-wt-") as tmp:
-        path = Path(tmp) / "wt"
-        git.run(repo, "worktree", "add", "-q", "--detach", str(path), start)
-        try:
-            yield path
-        finally:
-            git.worktree_remove(repo, path)
-
-
-def staging_start(repo: Path, base: str) -> str:
-    if git.remote_branch_exists(repo, base):
-        git.run(repo, "fetch", "-q", "origin", base)
-    start = f"origin/{base}"
-    if not git.ref_exists(repo, start):
-        raise NotFoundError(
-            f"branch '{base}' not found on origin; create it with "
-            f"'git push origin main:{base}'"
-        )
-    return start
-
-
 def pr_body(  # noqa: PLR0917
     item: Item,
     fetched: Fetched,
@@ -293,7 +265,7 @@ def pr_body(  # noqa: PLR0917
     return "\n".join(lines)
 
 
-def _changes(old: Tree, new: Tree) -> dict[str, list[str]]:
+def file_changes(old: Tree, new: Tree) -> dict[str, list[str]]:
     return {
         "added": sorted(set(new) - set(old)),
         "changed": sorted(r for r in new if r in old and old[r] != new[r]),
@@ -335,35 +307,15 @@ def build_candidate(
     return Built(flags=flags, body=body, unchanged=False)
 
 
-def commit_and_push(wt: Path, branch: str, message: str) -> bool:
-    """Commit the worktree (detached) and push it unless the branch already holds
-    the same tree. Returns whether it pushed."""
-    git.run(wt, "add", "-A")
-    # --no-verify: local hooks never run on untrusted upstream content.
-    git.run(wt, "commit", "-q", "--no-verify", "-m", message)
-    tree = git.run(wt, "rev-parse", "HEAD^{tree}")
-    if git.remote_tree(wt, branch) == tree:
-        return False
-    git.run(wt, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{branch}")
-    return True
-
-
 def publish(
     ctx: Context, item_id: str, *, branch: str, base: str, title: str, body: str
 ) -> tuple[PullRequest, str]:
     """Open or update the candidate PR and close older ones of the same item."""
-    open_pr = ctx.github.find_open_pull_request(branch, base)
-    if open_pr is None:
-        pr, status = ctx.github.open_pull_request(branch, base, title, body), "opened"
-    else:
-        pr = ctx.github.update_pull_request(open_pr.number, title, body)
-        status = "updated"
-    prefix = f"candidate/{item_id}/"
+    pr, status = open_or_update(ctx, branch, base, title, body)
+    prefix = candidate_branch(item_id, "")
     for stale in ctx.github.list_open_pull_requests(base):
         if stale.head.startswith(prefix) and stale.number != pr.number:
-            ctx.github.close_pull_request(
-                stale.number, f"Superseded by {pr.url} (newer upstream commit)."
-            )
+            ctx.github.close_pull_request(stale.number, f"Superseded by {pr.url}.")
     return pr, status
 
 
@@ -382,7 +334,7 @@ def make_candidate(
     """
     check_item_id(item_id)
     base = base_branch(Registry.load(ctx.repo))
-    start = staging_start(ctx.repo, base)
+    start = remote_start(ctx.repo, base)
     with view(ctx.repo, start) as wt:
         staged = Registry.load(wt)
         existing = staged.items.get(item_id)
@@ -409,7 +361,7 @@ def make_candidate(
                 return CandidateResult(
                     item=item_id, commit=fetched.commit, branch="", status="unchanged"
                 )
-            branch = f"candidate/{item_id}/{fetched.commit[:12]}"
+            branch = candidate_branch(item_id, fetched.commit)
             commit_and_push(wt, branch, f"candidate: {item_id} {fetched.commit[:12]}")
     title = f"candidate: {item_id} @ {fetched.commit[:12]}"
     pr, status = publish(
@@ -425,17 +377,6 @@ def make_candidate(
         flags=built.flags,
         status=status,
     )
-
-
-def _manifest_version(root: Path) -> str | None:
-    for rel in hashing.MANIFESTS:
-        try:
-            data = json.loads((root / rel).read_text(encoding="utf-8"))
-        except OSError, UnicodeDecodeError, ValueError:
-            continue
-        if isinstance(data, dict) and isinstance(data.get("version"), str):
-            return data["version"]
-    return None
 
 
 def _write_candidate(  # noqa: PLR0917
@@ -467,7 +408,7 @@ def _write_candidate(  # noqa: PLR0917
     files = hashing.hash_tree(root, reg.config.namespace)
     reg.lock.items[item_id] = ItemLock(
         kind=ItemKind.MIRROR,
-        version=fetched.plugin.version or _manifest_version(root),
+        version=fetched.plugin.version or builder.manifest_version(root),
         upstream=Upstream(
             repository=fetched.repository,
             commit=fetched.commit,
@@ -487,7 +428,7 @@ def _write_candidate(  # noqa: PLR0917
         fetched,
         old.upstream.commit if old else None,
         flags,
-        _changes(approved, candidate),
+        file_changes(approved, candidate),
         errors,
     )
 
@@ -505,21 +446,6 @@ def mirror(
     """
     source = get_source(Registry.load(ctx.repo), source_id)
     return make_candidate(ctx, source, plugin, item_id or plugin, new=True)
-
-
-def sync(ctx: Context, *, item: str | None = None) -> SyncResult:
-    """A candidate PR for every mirror on staging whose upstream moved."""
-    base = base_branch(Registry.load(ctx.repo))
-    with view(ctx.repo, staging_start(ctx.repo, base)) as wt:
-        mirrors = [
-            i.id for i in Registry.load(wt).items.items if i.kind is ItemKind.MIRROR
-        ]
-    if item is not None:
-        if item not in mirrors:
-            raise NotFoundError(f"no mirror item '{item}' on {base}")
-        mirrors = [item]
-    results = [make_candidate(ctx, None, None, i, new=False) for i in mirrors]
-    return SyncResult(candidates=results)
 
 
 def flags(ctx: Context, *, base: str = "origin/staging") -> FlagsResult:

@@ -9,12 +9,13 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from skill_dojo_core import (
     catalogs,
     frontmatter,
+    git,
     hashing,
     jsontext,
     metadata,
@@ -22,6 +23,7 @@ from skill_dojo_core import (
 )
 from skill_dojo_core.errors import InvalidInputError
 from skill_dojo_core.models import (
+    Approval,
     ChannelPolicy,
     Item,
     ItemKind,
@@ -46,6 +48,39 @@ PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 def plugin_dir(item_id: str) -> str:
     return f"{PLUGINS_DIR}/{item_id}"
+
+
+def version_of(data: bytes | str | None) -> str | None:
+    """``version`` of a manifest's JSON text, if it is a string."""
+    if data is None:
+        return None
+    try:
+        parsed = json.loads(data)
+    except ValueError:
+        return None
+    version = parsed.get("version") if isinstance(parsed, dict) else None
+    return version if isinstance(version, str) else None
+
+
+def manifest_version(root: Path) -> str | None:
+    """Version of the plugin in folder ``root``."""
+    for rel in (ROOT_MANIFEST, CLAUDE_MANIFEST):
+        try:
+            version = version_of((root / rel).read_bytes())
+        except OSError:
+            continue
+        if version:
+            return version
+    return None
+
+
+def manifest_version_at(repo: Path, ref: str, item_id: str) -> str | None:
+    """Version of plugin ``item_id`` as it is at ``ref``."""
+    for rel in (ROOT_MANIFEST, CLAUDE_MANIFEST):
+        version = version_of(git.show_file(repo, ref, f"{plugin_dir(item_id)}/{rel}"))
+        if version:
+            return version
+    return None
 
 
 def is_generated(rel: str, lock: ItemLock | None) -> bool:
@@ -76,11 +111,23 @@ def provenance(  # noqa: PLR0917
     lock: ItemLock,
     manifest: dict[str, Any],
     skill: str | None = None,
+    approval: Approval | None = None,
 ) -> metadata.Provenance:
-    """The provenance stamped into an item's manifest or one of its skills."""
+    """The provenance stamped into an item's manifest or one of its skills.
+
+    A bundle skill carries the upstream of its part; ``approval`` (from
+    ``approvals.yaml``, matching the locked content) adds the approval facts.
+    """
     upstream = lock.upstream
     source_path = f"{upstream.path}/skills/{skill}" if skill else None
+    part = next(
+        (p for p in lock.parts if skill and p.kind == "skill" and p.name == skill),
+        None,
+    )
     license_ = manifest.get("license")
+    if part is not None:
+        upstream, source_path = part.upstream, part.path
+        license_ = upstream.license
     return metadata.Provenance(
         registry_id=registry_id(config, item),
         kind=item.kind.value,
@@ -105,7 +152,16 @@ def provenance(  # noqa: PLR0917
         if item.deprecation
         else None,
         parts=[p.model_dump(by_alias=True) for p in lock.parts] or None,
+        approved_version=approval.version if approval else None,
+        approved_by=",".join(approval.reviewers) if approval else None,
+        approved_at=approval.approved_at if approval else None,
+        review_evidence=approval.pull_request if approval else None,
     )
+
+
+def approval_for(reg: Registry, item: Item) -> Approval | None:
+    lock = reg.lock.items.get(item.id)
+    return reg.approvals.for_digest(item.id, lock.tree_sha256) if lock else None
 
 
 @dataclass
@@ -294,6 +350,7 @@ class PluginBuild:
             self.item,
             self.lock,
             self.manifest_data(),
+            approval=approval_for(self.reg, self.item),
         )
         text = self.overlay.read_text(full) or ""
         self.overlay.write(
@@ -323,6 +380,7 @@ class PluginBuild:
                     self.lock,
                     manifest,
                     skill=name,
+                    approval=approval_for(self.reg, self.item),
                 )
                 text = metadata.stamped_skill(text, self.reg.config.namespace, prov)
                 self.overlay.write(skill_md, text)

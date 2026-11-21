@@ -6,19 +6,37 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from skill_dojo_core.errors import ExternalToolError
+from skill_dojo_core.errors import ExternalToolError, InvalidInputError
 
 log = logging.getLogger(__name__)
 
 
-def run(cwd: Path, *args: str, check: bool = True) -> str:
+# Refs the tool passes to git: no leading '-', no '..', no spaces.
+REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def is_ref(ref: str) -> bool:
+    return bool(REF_RE.match(ref)) and ".." not in ref
+
+
+def check_ref(ref: str) -> str:
+    if not is_ref(ref):
+        raise InvalidInputError(f"'{ref}' is not a valid git ref")
+    return ref
+
+
+def _exec(cwd: Path, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
     exe = shutil.which("git")
     if exe is None:
         raise ExternalToolError("git is not installed")
     log.debug("Running git %s", args[0] if args else "")
-    proc = subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603
         [exe, *args], cwd=cwd, capture_output=True, text=True, check=False
     )
+
+
+def run(cwd: Path, *args: str, check: bool = True) -> str:
+    proc = _exec(cwd, args)
     if check and proc.returncode != 0:
         raise ExternalToolError(
             f"git {args[0]} failed: {proc.stderr.strip() or proc.stdout.strip()}"
@@ -135,6 +153,27 @@ def remote_tree(repo: Path, branch: str) -> str | None:
     """Tree SHA of ``origin/<branch>`` after fetching it, or None if absent."""
     if not remote_branch_exists(repo, branch):
         return None
+    return run(repo, "rev-parse", f"{fetch_branch(repo, branch)}^{{tree}}")
+
+
+def ref_exists(repo: Path, ref: str) -> bool:
+    return bool(run(repo, "rev-parse", "--verify", "-q", ref, check=False))
+
+
+def show_file(repo: Path, ref: str, path: str) -> bytes | None:
+    """Bytes of ``path`` at ``ref``, or None when it is not there."""
+    sha = run(repo, "rev-parse", "--verify", "-q", f"{ref}:{path}", check=False)
+    return show_blob(repo, sha) if sha else None
+
+
+def succeeds(cwd: Path, *args: str) -> bool:
+    """Whether ``git <args>`` exits 0 (for yes/no questions to git)."""
+    return _exec(cwd, args).returncode == 0
+
+
+def fetch_branch(repo: Path, branch: str) -> str:
+    """Fetch ``origin/<branch>`` (force) and return that ref."""
+    check_ref(branch)
     run(
         repo,
         "fetch",
@@ -142,8 +181,8 @@ def remote_tree(repo: Path, branch: str) -> str | None:
         "origin",
         f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
     )
-    return run(repo, "rev-parse", f"origin/{branch}^{{tree}}")
+    return f"origin/{branch}"
 
 
-def ref_exists(repo: Path, ref: str) -> bool:
-    return bool(run(repo, "rev-parse", "--verify", "-q", ref, check=False))
+def is_ancestor(repo: Path, commit: str, ref: str) -> bool:
+    return succeeds(repo, "merge-base", "--is-ancestor", commit, ref)

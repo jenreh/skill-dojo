@@ -24,11 +24,12 @@ def test_not_implemented_has_its_own_code() -> None:
 def test_main_maps_core_errors_to_exit_codes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("sys.argv", ["skill-dojo", "promote"])
+    # The test cwd is not a git repository.
+    monkeypatch.setattr("sys.argv", ["skill-dojo", "clients", "list"])
     with pytest.raises(SystemExit) as exc:
         main()
-    assert exc.value.code == 3
-    assert "not implemented" in capsys.readouterr().err
+    assert exc.value.code == 5
+    assert "not inside a git repository" in capsys.readouterr().err
 
 
 def test_subclass_uses_its_parents_code() -> None:
