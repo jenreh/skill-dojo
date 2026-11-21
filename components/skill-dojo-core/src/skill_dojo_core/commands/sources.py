@@ -15,6 +15,9 @@ from skill_dojo_core.sources import UpstreamPlugin
 
 log = logging.getLogger(__name__)
 
+# Bundle parts from this repo's own plugins use this source id.
+LOCAL_SOURCE = "local"
+
 
 class SourcesResult(Result):
     sources: list[Source]
@@ -55,6 +58,10 @@ def source_add(
         reg = Registry.load(ctx.repo)
         if any(s.id == source_id for s in reg.sources.sources):
             raise ConflictError(f"source '{source_id}' already exists")
+        if source_id == LOCAL_SOURCE:
+            raise InvalidInputError(
+                f"'{LOCAL_SOURCE}' is reserved for this repo's own plugins"
+            )
         try:
             source = Source(
                 id=source_id,

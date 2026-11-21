@@ -257,6 +257,9 @@ class Approval(YamlModel):
     item: str
     version: str | None = None
     commit: str | None = None
+    digest: str | None = Field(
+        default=None, description="treeSha256 of the item as it was approved"
+    )
     pull_request: str
     reviewers: list[str] = Field(default_factory=list)
     approved_at: str
@@ -266,6 +269,11 @@ class Approval(YamlModel):
 
 class ApprovalsFile(YamlModel):
     approvals: list[Approval] = Field(default_factory=list)
+
+    def for_digest(self, item: str, digest: str) -> Approval | None:
+        """The newest approval of ``item`` with exactly this content."""
+        found = [a for a in self.approvals if a.item == item and a.digest == digest]
+        return max(found, key=lambda a: a.approved_at) if found else None
 
 
 # --- registry/channel-policy.yaml -------------------------------------------

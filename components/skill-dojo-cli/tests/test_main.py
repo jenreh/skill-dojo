@@ -5,7 +5,6 @@ import pytest
 from typer.testing import CliRunner
 
 from skill_dojo_cli.main import app
-from skill_dojo_core import NotImplementedYetError
 
 runner = CliRunner()
 
@@ -46,30 +45,6 @@ def test_every_command_has_help(name: str) -> None:
     assert "Usage" in result.output
 
 
-STUBS = [
-    ["bundle", "create", "b"],
-    ["bundle", "add", "b", "x:p/skill/s"],
-    ["bundle", "remove", "b", "x:p/skill/s"],
-    ["review", "list"],
-    ["review", "show", "1"],
-    ["review", "approve", "1"],
-    ["review", "reject", "1"],
-    ["review", "quarantine", "1"],
-    ["promote"],
-    ["release"],
-    ["revoke", "x"],
-    ["clients", "add", "c", "main"],
-    ["clients", "list"],
-    ["clients", "remove", "c"],
-]
-
-
-@pytest.mark.parametrize("argv", STUBS, ids=" ".join)
-def test_stubs_raise_not_implemented(argv: list[str]) -> None:
-    result = runner.invoke(app, argv)
-    assert isinstance(result.exception, NotImplementedYetError)
-
-
 def test_verbose_enables_debug_logging() -> None:
-    runner.invoke(app, ["-v", "promote"])
+    runner.invoke(app, ["-v", "clients", "list"])
     assert logging.getLogger().level == logging.DEBUG

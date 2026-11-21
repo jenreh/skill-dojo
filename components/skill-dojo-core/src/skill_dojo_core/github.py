@@ -16,7 +16,10 @@ from skill_dojo_core.results import Result
 
 log = logging.getLogger(__name__)
 
-PR_FIELDS = "number,url,title,body,headRefName,baseRefName,state"
+PR_FIELDS = "number,url,title,body,headRefName,baseRefName,state,author"
+MERGED_FIELDS = f"{PR_FIELDS},mergedAt,mergeCommit,mergedBy"
+# mergeStateStatus values where a merge waits for something a human must do.
+WAITING = frozenset({"BLOCKED", "BEHIND", "DRAFT", "UNSTABLE", "UNKNOWN"})
 
 
 class PullRequest(Result):
@@ -27,6 +30,16 @@ class PullRequest(Result):
     head: str
     base: str
     state: str = "OPEN"
+    author: str = ""
+    merged_at: str | None = None
+    merge_commit: str | None = None
+    merged_by: str | None = None
+
+
+class Review(Result):
+    user: str
+    state: str  # APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
+    submitted_at: str | None = None
 
 
 class GitHub(Protocol):
@@ -52,6 +65,29 @@ class GitHub(Protocol):
 
     def close_pull_request(self, number: int, comment: str) -> None: ...
 
+    def get_pull_request(self, number: int) -> PullRequest: ...
+
+    def list_merged_pull_requests(self, base: str) -> list[PullRequest]:
+        """Recently merged PRs into ``base`` (newest first)."""
+        ...
+
+    def reviews(self, number: int) -> list[Review]:
+        """The latest review of each reviewer."""
+        ...
+
+    def approve(self, number: int, body: str) -> None:
+        """Submit an approving review."""
+        ...
+
+    def merge(self, number: int) -> bool:
+        """Merge with a merge commit. ``False`` when the PR waits for something
+        (branch protection, checks); never bypasses it."""
+        ...
+
+
+def _login(value: Any) -> str | None:
+    return value.get("login") if isinstance(value, dict) else None
+
 
 def _pull_request(data: dict[str, Any]) -> PullRequest:
     return PullRequest(
@@ -62,6 +98,10 @@ def _pull_request(data: dict[str, Any]) -> PullRequest:
         head=data.get("headRefName") or "",
         base=data.get("baseRefName") or "",
         state=data.get("state") or "OPEN",
+        author=_login(data.get("author")) or "",
+        merged_at=data.get("mergedAt"),
+        merge_commit=(data.get("mergeCommit") or {}).get("oid"),
+        merged_by=_login(data.get("mergedBy")),
     )
 
 
@@ -163,3 +203,48 @@ class GhCli:
 
     def close_pull_request(self, number: int, comment: str) -> None:
         self.run("pr", "close", str(number), f"--comment={comment}")
+
+    def get_pull_request(self, number: int) -> PullRequest:
+        return self.view(str(number))
+
+    def list_merged_pull_requests(self, base: str) -> list[PullRequest]:
+        found = json.loads(
+            self.run(
+                "pr",
+                "list",
+                f"--base={base}",
+                "--state=merged",
+                "--json",
+                MERGED_FIELDS,
+                "--limit",
+                "200",
+            )
+            or "[]"
+        )
+        return [_pull_request(item) for item in found]
+
+    def reviews(self, number: int) -> list[Review]:
+        data = json.loads(
+            self.run("pr", "view", str(number), "--json", "latestReviews") or "{}"
+        )
+        return [
+            Review(
+                user=_login(r.get("author")) or "",
+                state=r.get("state") or "",
+                submitted_at=r.get("submittedAt"),
+            )
+            for r in data.get("latestReviews") or []
+        ]
+
+    def approve(self, number: int, body: str) -> None:
+        self.run("pr", "review", str(number), "--approve", f"--body={body}")
+
+    def merge(self, number: int) -> bool:
+        state = json.loads(
+            self.run("pr", "view", str(number), "--json", "mergeStateStatus") or "{}"
+        ).get("mergeStateStatus")
+        if state in WAITING:
+            log.info("PR %d waits: %s", number, state)
+            return False
+        self.run("pr", "merge", str(number), "--merge")
+        return True

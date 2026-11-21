@@ -15,6 +15,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
 
+from skill_dojo_core import git
 from skill_dojo_core.errors import InvalidInputError, NotFoundError
 from skill_dojo_core.models import (
     ApprovalsFile,
@@ -91,9 +92,11 @@ def _compact(data: Any, *, defaults: bool, top: bool = True) -> Any:
 
 
 def _match_key(items: list[Any]) -> str | None:
+    """The key that identifies each entry, when it is there and unique."""
     for key in MATCH_KEYS:
         if items and all(isinstance(i, dict) and key in i for i in items):
-            return key
+            values = [str(i[key]) for i in items]
+            return key if len(set(values)) == len(values) else None
     return None
 
 
@@ -141,6 +144,20 @@ def save_yaml_model(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return True
+
+
+def model_at[M: BaseModel](repo: Path, ref: str, name: str, model: type[M]) -> M:
+    """A registry file as it is at ``ref`` (empty model when absent)."""
+    data = git.show_file(repo, ref, f"{REGISTRY_DIR}/{name}")
+    if data is None:
+        return model()
+    try:
+        if name == LOCK:
+            return model.model_validate_json(data)
+        raw = yaml_rt().load(data.decode("utf-8"))
+        return model.model_validate(_plain(raw) or {})
+    except (ValidationError, YAMLError, UnicodeDecodeError) as exc:
+        raise InvalidInputError(f"{ref}:{REGISTRY_DIR}/{name}: {exc}") from exc
 
 
 def load_lock(repo: Path) -> LockFile:

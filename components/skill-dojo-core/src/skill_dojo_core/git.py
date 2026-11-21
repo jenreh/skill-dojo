@@ -147,3 +147,24 @@ def remote_tree(repo: Path, branch: str) -> str | None:
 
 def ref_exists(repo: Path, ref: str) -> bool:
     return bool(run(repo, "rev-parse", "--verify", "-q", ref, check=False))
+
+
+def show_file(repo: Path, ref: str, path: str) -> bytes | None:
+    """Bytes of ``path`` at ``ref``, or None when it is not there."""
+    sha = run(repo, "rev-parse", "--verify", "-q", f"{ref}:{path}", check=False)
+    return show_blob(repo, sha) if sha else None
+
+
+def succeeds(cwd: Path, *args: str) -> bool:
+    """Whether ``git <args>`` exits 0 (for yes/no questions to git)."""
+    exe = shutil.which("git")
+    if exe is None:
+        raise ExternalToolError("git is not installed")
+    proc = subprocess.run(  # noqa: S603
+        [exe, *args], cwd=cwd, capture_output=True, check=False
+    )
+    return proc.returncode == 0
+
+
+def is_ancestor(repo: Path, commit: str, ref: str) -> bool:
+    return succeeds(repo, "merge-base", "--is-ancestor", commit, ref)

@@ -22,6 +22,7 @@ from skill_dojo_core import (
 )
 from skill_dojo_core.errors import InvalidInputError
 from skill_dojo_core.models import (
+    Approval,
     ChannelPolicy,
     Item,
     ItemKind,
@@ -76,10 +77,21 @@ def provenance(  # noqa: PLR0917
     lock: ItemLock,
     manifest: dict[str, Any],
     skill: str | None = None,
+    approval: Approval | None = None,
 ) -> metadata.Provenance:
-    """The provenance stamped into an item's manifest or one of its skills."""
+    """The provenance stamped into an item's manifest or one of its skills.
+
+    A bundle skill carries the upstream of its part; ``approval`` (from
+    ``approvals.yaml``, matching the locked content) adds the approval facts.
+    """
     upstream = lock.upstream
     source_path = f"{upstream.path}/skills/{skill}" if skill else None
+    part = next(
+        (p for p in lock.parts if skill and p.kind == "skill" and p.name == skill),
+        None,
+    )
+    if part is not None:
+        upstream, source_path = part.upstream, part.path
     license_ = manifest.get("license")
     return metadata.Provenance(
         registry_id=registry_id(config, item),
@@ -105,7 +117,16 @@ def provenance(  # noqa: PLR0917
         if item.deprecation
         else None,
         parts=[p.model_dump(by_alias=True) for p in lock.parts] or None,
+        approved_version=approval.version if approval else None,
+        approved_by=",".join(approval.reviewers) if approval else None,
+        approved_at=approval.approved_at if approval else None,
+        review_evidence=approval.pull_request if approval else None,
     )
+
+
+def approval_for(reg: Registry, item: Item) -> Approval | None:
+    lock = reg.lock.items.get(item.id)
+    return reg.approvals.for_digest(item.id, lock.tree_sha256) if lock else None
 
 
 @dataclass
@@ -294,6 +315,7 @@ class PluginBuild:
             self.item,
             self.lock,
             self.manifest_data(),
+            approval=approval_for(self.reg, self.item),
         )
         text = self.overlay.read_text(full) or ""
         self.overlay.write(
@@ -323,6 +345,7 @@ class PluginBuild:
                     self.lock,
                     manifest,
                     skill=name,
+                    approval=approval_for(self.reg, self.item),
                 )
                 text = metadata.stamped_skill(text, self.reg.config.namespace, prov)
                 self.overlay.write(skill_md, text)

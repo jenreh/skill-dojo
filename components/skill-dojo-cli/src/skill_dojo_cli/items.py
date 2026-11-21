@@ -8,7 +8,6 @@ import typer
 import skill_dojo_core as core
 from skill_dojo_cli.context import build_context
 from skill_dojo_cli.output import echo_lines
-from skill_dojo_core import not_implemented
 
 bundle_app = typer.Typer(help="Build plugins out of parts from several sources.")
 local_app = typer.Typer(help="Register the team's own plugins.")
@@ -41,27 +40,49 @@ def sync(item: ItemOption = None) -> None:
     """Open candidate PRs for upstream changes."""
     result = core.sync(build_context(Path.cwd(), need_actor=True), item=item)
     if not result.candidates:
-        typer.echo("No mirrors to sync.")
+        typer.echo("No mirrors or bundles to sync.")
     for candidate in result.candidates:
         echo_candidate(candidate)
 
 
+PartsArgument = Annotated[
+    list[str], typer.Argument(help="Parts as source:plugin/kind/name.")
+]
+
+
 @bundle_app.command("create")
-def bundle_create(name: str) -> None:
-    """Create a new bundle plugin."""
-    not_implemented("bundle create")
+def bundle_create(
+    name: str,
+    parts: Annotated[
+        list[str] | None, typer.Argument(help="Parts as source:plugin/kind/name.")
+    ] = None,
+    description: Annotated[str | None, typer.Option(help="Plugin text.")] = None,
+    category: Annotated[str | None, typer.Option(help="Catalog category.")] = None,
+) -> None:
+    """Create a new bundle plugin as a candidate PR."""
+    ctx = build_context(Path.cwd(), need_actor=True)
+    echo_candidate(
+        core.bundle_create(
+            ctx, name, parts or [], description=description, category=category
+        )
+    )
 
 
 @bundle_app.command("add")
-def bundle_add(name: str, part: str) -> None:
-    """Add a part (source:plugin/kind/name) to a bundle."""
-    not_implemented("bundle add")
+def bundle_add(name: str, parts: PartsArgument) -> None:
+    """Add parts (source:plugin/kind/name; source 'local' = this repo)."""
+    ctx = build_context(Path.cwd(), need_actor=True)
+    echo_candidate(core.bundle_add(ctx, name, parts))
 
 
 @bundle_app.command("remove")
-def bundle_remove(name: str, part: str) -> None:
-    """Remove a part from a bundle."""
-    not_implemented("bundle remove")
+def bundle_remove(
+    name: str,
+    parts: Annotated[list[str], typer.Argument(help="Parts as kind/name.")],
+) -> None:
+    """Remove parts from a bundle."""
+    ctx = build_context(Path.cwd(), need_actor=True)
+    echo_candidate(core.bundle_remove(ctx, name, parts))
 
 
 @local_app.command("add")

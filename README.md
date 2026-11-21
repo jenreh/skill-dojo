@@ -45,7 +45,13 @@ uv run skill-dojo --help
 | `skill-dojo source add <id> <owner/name or URL> [--type] [--ref] [--allow]` / `list` / `remove` | Upstream sources: Agent Plugins or Claude marketplaces, or a plain git repo |
 | `skill-dojo browse <source>` | What a source offers at its current ref (remote plugin sources included) |
 | `skill-dojo mirror <source> <plugin> [--as id]` | Candidate PR into `staging`: vendored files pinned to the upstream commit, lock entry, metadata, risk flags |
-| `skill-dojo sync [--item]` | A candidate PR for every mirror on `staging` whose upstream moved (idempotent; quarantined items skipped) |
+| `skill-dojo sync [--item]` | A candidate PR for every mirror and bundle on `staging` whose upstream moved (idempotent; quarantined items skipped) |
+| `skill-dojo bundle create <name> [parts...] [--description] [--category]` / `add <name> <parts...>` / `remove <name> <kind/name...>` | A bundle plugin of parts `source:plugin/kind/name` (kind `skill`, `agent` or `mcp_server`; source `local` = this repo's own plugins), each pinned and locked; every change is a candidate PR with a patch bump |
+| `skill-dojo review list` / `show <pr>` / `approve <pr>` / `reject <pr> [--reason]` / `quarantine <pr>` | Candidate PRs: approve submits a GitHub review and merges (reports `waiting` while branch protection blocks); quarantine closes it and opens a PR setting `quarantined: true` |
+| `skill-dojo promote` | PR `staging` → `main`: reads approvals of merged candidate PRs from GitHub (also merges done on github.com), writes `approvals.yaml`, stamps `approved-by`/`approved-at`/`reviewEvidence`; blocked by `riskTier: forbidden`, too few reviewers, or `stable` missing from `supported_channels` |
+| `skill-dojo release` | Tag `origin/main` as `marketplace-vYYYY.MM.DD[.N]` with notes (added, updated, removed items) after validating it |
+| `skill-dojo revoke <item> [--to TAG] [--reason]` | Hotfix PR into `main` that removes the item (or rolls it back to a tag and quarantines it), a back-merge PR into `staging`, and the clients whose ref holds the item |
+| `skill-dojo clients add <name> <ref> [--contact] [--notes] [--update]` / `list` / `remove` | The hand-kept `registry/clients.yaml` |
 | `skill-dojo flags [--base origin/staging]` | Risk flags of the working tree against a base, as markdown (the validate workflow posts them on PRs into `staging`) |
 | `skill-dojo vendor <url> [--ref TAG] [--name] [--update]` | Consumer side: `git subtree` of a marketplace into `.agents/<name>` plus `.agents/skills` and `.claude/skills` links (replaces `add-skills.sh`) |
 

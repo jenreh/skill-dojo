@@ -8,16 +8,28 @@ from pydantic import BaseModel
 import skill_dojo_core
 from skill_dojo_core import (
     AdoptResult,
+    Approval,
     BrowseResult,
     BuildResult,
     CandidateResult,
+    Client,
+    ClientsResult,
     Finding,
     FlagsResult,
     InitResult,
     LocalAddResult,
     LockRefreshResult,
+    PolicyBlock,
+    PromoteResult,
     PullRequest,
+    ReleaseResult,
     Result,
+    Review,
+    ReviewActionResult,
+    ReviewEntry,
+    ReviewListResult,
+    ReviewShowResult,
+    RevokeResult,
     RiskFlag,
     Source,
     SourcesResult,
@@ -49,6 +61,38 @@ EXAMPLES: list[BaseModel] = [
     ),
     SyncResult(candidates=[CANDIDATE]),
     FlagsResult(base="origin/staging", flags={"p": [FLAG]}, markdown="m"),
+    Review(user="bob", state="APPROVED", submitted_at="2026-11-21T10:00:00Z"),
+    ENTRY := ReviewEntry(pull_request=PR, item="p"),
+    ReviewListResult(entries=[ENTRY]),
+    ReviewShowResult(pull_request=PR, item="p", files=["M\tplugins/p/plugin.json"]),
+    ReviewActionResult(pull_request=PR, item="p", status="quarantined", quarantine=PR),
+    PolicyBlock(item="p", reason="risk tier is forbidden"),
+    PromoteResult(
+        status="opened",
+        branch="promote/2026-11-21",
+        pull_request=PR,
+        approvals=[
+            Approval(
+                item="p",
+                digest="a" * 64,
+                pull_request="u",
+                reviewers=["bob"],
+                approved_at="2026-11-21T10:00:00Z",
+            )
+        ],
+        items=["p"],
+    ),
+    ReleaseResult(status="created", tag="marketplace-v2026.11.21", commit="c" * 40),
+    CLIENT := Client(name="team", ref="marketplace-v2026.11.21"),
+    ClientsResult(clients=[CLIENT]),
+    RevokeResult(
+        item="p",
+        action="removed",
+        branch="revoke/p",
+        pull_request=PR,
+        back_merge=PR,
+        affected_clients=[CLIENT],
+    ),
 ]
 
 
@@ -63,7 +107,7 @@ def exported_results() -> set[type[BaseModel]]:
 
 
 def test_every_result_has_an_example() -> None:
-    assert {type(e) for e in EXAMPLES} == exported_results()
+    assert exported_results() <= {type(e) for e in EXAMPLES}
 
 
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda e: type(e).__name__)
