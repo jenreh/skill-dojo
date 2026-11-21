@@ -89,6 +89,7 @@ skill-dojo/                              # workspace root, virtual (not publishe
 ```
 
 Dependency rules (one direction only):
+
 - `skill-dojo-core` imports neither `typer` nor `reflex` nor the other two packages. All
   behaviour lives here; `commands/*` is its public API.
 - `skill-dojo` (CLI) and `skill-dojo-web` depend only on core and contain no business
@@ -116,6 +117,7 @@ Core is written as if its caller were a server, so a later `skill-dojo-server` p
 (an HTTP API and/or a multi-user web UI) only adds a front end, auth and a workspace
 manager, and calls the same functions. Rules for every `skill_dojo_core.commands`
 function:
+
 - **Explicit context, no globals.** Each operation takes a `Context` (frozen dataclass:
   `repo: Path`, `github: GitHub`, `actor: str`, `now: datetime`,
   `progress: Callable[[str], None] | None`). No reads of `cwd`, environment variables or
@@ -139,6 +141,7 @@ function:
   per-user tokens around the same calls, not rewriting the logic.
 
 Rules inside a package:
+
 - Pure logic (hashing, normalization, risk flags, policy checks, version bumps, metadata
   mapping) is plain functions taking data and returning data, unit-tested without I/O.
   No classes where a function will do.
@@ -355,6 +358,8 @@ approve/reject/quarantine) · Marketplace preview (exact catalogs + tree `build`
 write) · Releases (promote, tag, notes) · Clients (edit `clients.yaml`) · Audit (timeline
 from git log, PRs, tags). `skill-dojo serve` without the extra prints an install hint.
 
+IMPORTANT: use the claude design prototype designed here: <https://claude.ai/artifact/5R1VYRvB8oh65BNwXoDx5V#page-dcb81aee8d83> the resulting web ui must look exactly like the designs
+
 Done: state unit tests (`reflex-testing-state`); a Playwright smoke run of each page
 against a fixture curated repo; approving in the UI merges the fake PR.
 
@@ -374,8 +379,9 @@ against a fixture curated repo; approving in the UI merges the fake PR.
 ## Per-phase definition of done
 
 Tests first and green, coverage ≥ 80 %, `task lint` clean, no file > 1000 lines,
-`code-review` skill run, README/CLAUDE.md updated where affected, memory updated
-(decisions such as the `skill-dojo` CLI name, hash scheme, git-SHA pin), one PR per phase.
+`code-review` and `security-review` skill run, README/CLAUDE.md updated where
+affected, memory updated (decisions such as the `skill-dojo` CLI name, hash scheme,
+git-SHA pin), one PR per phase.
 
 ## Out of scope (v1, from the spec)
 
