@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .ink{fill:#004A99}
+    @media (prefers-color-scheme: dark){.ink{fill:#0A84FF}}
+  </style>
+  <!-- Tuned for 16 px: thicker parts, no middle beam. -->
+  <g class="ink">
+    <path id="kasagi" d="M2 9.5Q32 14.5 62 9.5L57 20.5H7Z"/>
+    <rect id="pillar-left" x="15" y="19.5" width="10" height="35"/>
+    <rect id="pillar-right" x="39" y="19.5" width="10" height="35"/>
+  </g>
+</svg>
