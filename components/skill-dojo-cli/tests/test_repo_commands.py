@@ -69,7 +69,7 @@ def test_init_pin_defaults_and_conflicts(repo: Path) -> None:
         app, ["init", "--tool-git", "1" * 40, "--tool-version", "1.0.0"]
     )
     assert result.exception is not None
-    assert "either" in str(result.exception)
+    assert "exactly one" in str(result.exception)
     assert invoke("init").exit_code == 0
     assert (
         "skill-dojo=="

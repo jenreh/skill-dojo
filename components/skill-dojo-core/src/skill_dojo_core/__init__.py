@@ -25,7 +25,7 @@ from skill_dojo_core.errors import (
 )
 from skill_dojo_core.github import GhCli, GitHub
 from skill_dojo_core.repo_lock import repo_lock
-from skill_dojo_core.models import ToolPin
+from skill_dojo_core.models import ToolPin, tool_pin
 from skill_dojo_core.results import Result
 from skill_dojo_core.validation import Finding, ValidationReport
 
@@ -56,5 +56,6 @@ __all__ = [
     "lock_refresh",
     "not_implemented",
     "repo_lock",
+    "tool_pin",
     "validate",
 ]

@@ -197,14 +197,5 @@ class Registry:
     def save_items(self) -> bool:
         return save_yaml_model(self.repo, ITEMS, self.items)
 
-    def save_sources(self) -> bool:
-        return save_yaml_model(self.repo, SOURCES, self.sources)
-
-    def save_approvals(self) -> bool:
-        return save_yaml_model(self.repo, APPROVALS, self.approvals)
-
-    def save_clients(self) -> bool:
-        return save_yaml_model(self.repo, CLIENTS, self.clients)
-
     def save_lock(self) -> bool:
         return save_lock(self.repo, self.lock)

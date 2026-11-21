@@ -227,3 +227,20 @@ def test_branding_icon_must_stay_in_repo(curated: Context, tmp_path: Path) -> No
     add_plugin(curated.repo)
     with pytest.raises(InvalidInputError, match="outside the repo"):
         local_add(curated, "plugins/hello")
+
+
+def test_hand_added_mcp_config_is_locked_not_generated(curated: Context) -> None:
+    add_plugin(curated.repo)
+    local_add(curated, "plugins/hello")
+    mcp = {
+        "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+        "mcpServers": {
+            "docs": {"type": "stdio", "command": "npx", "args": ["docs-mcp@1.0.0"]}
+        },
+    }
+    (curated.repo / "plugins/hello/.mcp.json").write_text(json.dumps(mcp))
+    assert any(".mcp.json: drift: extra" in e for e in errors(curated))
+    lock_refresh(curated)
+    assert errors(curated) == []
+    (curated.repo / "plugins/hello/.mcp.json").write_text(json.dumps({**mcp, "x": 1}))
+    assert any(".mcp.json: drift: changed" in e for e in errors(curated))

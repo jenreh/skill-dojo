@@ -55,8 +55,6 @@ def init(
 ) -> InitResult:
     """Scaffold ``registry/``, empty catalogs and the validate workflow."""
     repo = ctx.repo
-    if registry.registry_path(repo, registry.CONFIG).exists():
-        raise ConflictError("registry/config.yaml already exists")
     market = name or repo.name.lower()
     config = RegistryConfig(
         name=market,
@@ -66,6 +64,8 @@ def init(
     )
     created: list[str] = []
     with repo_lock(repo):
+        if registry.registry_path(repo, registry.CONFIG).exists():
+            raise ConflictError("registry/config.yaml already exists")
         files = {
             registry.CONFIG: config,
             registry.SOURCES: SourcesFile(),
@@ -87,9 +87,7 @@ def init(
         created.append(workflows.VALIDATE_WORKFLOW)
         if _ensure_gitignore(repo):
             created.append(".gitignore")
-        overlay = builder.plan(Registry.load(repo))
-        created += overlay.changes()
-        overlay.apply()
+        created += builder.apply_build(Registry.load(repo))
     ctx.report(f"Initialized marketplace '{market}'")
     log.info("Initialized marketplace %s", market)
     return InitResult(created=sorted(set(created)))
@@ -101,9 +99,7 @@ def build(ctx: Context, *, check: bool = False) -> BuildResult:
         overlay = builder.plan(Registry.load(ctx.repo))
         return BuildResult(changed=overlay.changes(), applied=False)
     with repo_lock(ctx.repo):
-        overlay = builder.plan(Registry.load(ctx.repo))
-        changed = overlay.changes()
-        overlay.apply()
+        changed = builder.apply_build(Registry.load(ctx.repo))
     ctx.report(f"Build changed {len(changed)} file(s)")
     return BuildResult(changed=changed, applied=True)
 

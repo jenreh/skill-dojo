@@ -25,7 +25,7 @@ class LockRefreshResult(Result):
     unchanged: list[str]
 
 
-def local_lock(reg: Registry, item: Item, exclude: set[str], commit: str) -> ItemLock:
+def _local_lock(reg: Registry, item: Item, exclude: set[str], commit: str) -> ItemLock:
     """A lock entry for a local item: its files as they are now."""
     root = reg.repo / builder.plugin_dir(item.id)
     files = hashing.hash_tree(root, reg.config.namespace, exclude=exclude)
@@ -81,16 +81,15 @@ def local_add(
         reg = Registry.load(ctx.repo)
         if reg.items.get(item_id) is not None:
             raise ConflictError(f"'{item_id}' is already in registry/items.yaml")
+        commit = git.head(ctx.repo)
         item = Item(id=item_id, kind=ItemKind.LOCAL, category=category)
         reg.items.items.append(item)
         generated = _prepare(reg, item)
-        lock = local_lock(reg, item, generated, git.head(ctx.repo))
+        lock = _local_lock(reg, item, generated, commit)
         reg.lock.items[item_id] = lock
         reg.save_items()
         reg.save_lock()
-        overlay = builder.plan(reg)
-        changed = sorted({*overlay.changes(), *generated})
-        overlay.apply()
+        changed = sorted({*builder.apply_build(reg), *generated})
     ctx.report(f"Added local item '{item_id}'")
     log.info("Added local item %s", item_id)
     return LocalAddResult(item=item_id, tree_sha256=lock.tree_sha256, changed=changed)
@@ -120,9 +119,9 @@ def lock_refresh(ctx: Context, *, item: str | None = None) -> LockRefreshResult:
             exclude = {
                 rel
                 for rel in listed
-                if builder.is_generated(rel, old.files if old else {}, reg.config)
+                if builder.is_generated(rel, old.files if old else None, reg.config)
             }
-            new = local_lock(reg, target, exclude, commit)
+            new = _local_lock(reg, target, exclude, commit)
             if old is not None and old.tree_sha256 == new.tree_sha256:
                 unchanged.append(target.id)
                 continue
@@ -130,6 +129,6 @@ def lock_refresh(ctx: Context, *, item: str | None = None) -> LockRefreshResult:
             refreshed.append(target.id)
         if refreshed:
             reg.save_lock()
-            builder.plan(reg).apply()
-    ctx.report(f"Refreshed {len(refreshed)} lock entr(ies)")
+            builder.apply_build(reg)
+    ctx.report(f"Refreshed lock entries: {len(refreshed)}")
     return LockRefreshResult(refreshed=refreshed, unchanged=unchanged)

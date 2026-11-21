@@ -61,12 +61,24 @@ def matches(rel: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(rel, pattern) for pattern in patterns)
 
 
+# A manifest or MCP file is generated only when its counterpart is the locked one,
+# so a real .mcp.json added by hand is still locked and drift-checked.
+COUNTERPARTS = {
+    ROOT_MANIFEST: CLAUDE_MANIFEST,
+    CLAUDE_MANIFEST: ROOT_MANIFEST,
+    ROOT_MCP: CLAUDE_MCP,
+    CLAUDE_MCP: ROOT_MCP,
+}
+
+
 def is_generated(
     rel: str, locked: dict[str, Any] | None, config: RegistryConfig
 ) -> bool:
     """Whether ``rel`` (inside a plugin) is owned by build rather than upstream."""
     if locked is None or rel in locked:
         return False
+    if rel in COUNTERPARTS:
+        return COUNTERPARTS[rel] in locked
     return matches(rel, generated_patterns(config))
 
 
@@ -347,6 +359,11 @@ def with_schema(text: str) -> str:
     return jsontext.dump({"$schema": PLUGIN_SCHEMA, **data})
 
 
+def quote(value: str) -> str:
+    """A double-quoted YAML scalar (a JSON string is valid YAML)."""
+    return json.dumps(value, ensure_ascii=False)
+
+
 def stub_yaml(
     name: str, skill_text: str, icon: str | None, brand_color: str | None
 ) -> str:
@@ -358,13 +375,13 @@ def stub_yaml(
     short = short_description(str(data.get("description") or "")).replace('"', "'")
     lines = [
         "interface:",
-        f'  display_name: "{display_name(name)}"',
-        f'  short_description: "{short}"',
+        f"  display_name: {quote(display_name(name))}",
+        f"  short_description: {quote(short)}",
     ]
     if icon:
-        lines += [f'  icon_small: "{icon}"', f'  icon_large: "{icon}"']
+        lines += [f"  icon_small: {quote(icon)}", f"  icon_large: {quote(icon)}"]
     if brand_color:
-        lines.append(f'  brand_color: "{brand_color}"')
+        lines.append(f"  brand_color: {quote(brand_color)}")
     lines += [
         "policy:",
         f"  allow_implicit_invocation: {'true' if implicit else 'false'}",
@@ -414,3 +431,11 @@ def plan(reg: Registry) -> Overlay:
     overlay.write(catalogs.AGENTS_CATALOG, catalogs.agents_catalog(reg.config, plugins))
     overlay.write(catalogs.CLAUDE_CATALOG, catalogs.claude_catalog(reg.config, plugins))
     return overlay
+
+
+def apply_build(reg: Registry) -> list[str]:
+    """Run ``build`` for real and return the changed paths."""
+    overlay = plan(reg)
+    changed = overlay.changes()
+    overlay.apply()
+    return changed

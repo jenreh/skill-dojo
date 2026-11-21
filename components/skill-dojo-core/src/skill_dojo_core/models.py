@@ -18,6 +18,8 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
+from skill_dojo_core.errors import InvalidInputError
+
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 ITEM_ID_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
@@ -122,6 +124,16 @@ class ToolPin(YamlModel):
         if self.version is not None and not re.match(r"^\d+\.\d+\.\d+$", self.version):
             raise ValueError("tool.version must be an exact X.Y.Z version")
         return self
+
+
+def tool_pin(git: str | None, version: str | None) -> ToolPin:
+    """A pin from CLI-style options; exactly one must be given."""
+    if (git is None) == (version is None):
+        raise InvalidInputError("give exactly one of a git SHA or a version")
+    try:
+        return ToolPin(git=git, version=version)
+    except ValueError as exc:
+        raise InvalidInputError(str(exc)) from exc
 
 
 class Layout(YamlModel):

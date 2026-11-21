@@ -9,15 +9,7 @@ import typer
 import skill_dojo_core as core
 from skill_dojo_cli.context import build_context
 from skill_dojo_cli.output import echo_lines, echo_report
-from skill_dojo_core import InvalidInputError, ToolPin, not_implemented
-
-
-def tool_pin(git_sha: str | None, tool_version: str | None) -> ToolPin:
-    if git_sha and tool_version:
-        raise InvalidInputError("use either --tool-git or --tool-version")
-    if git_sha:
-        return ToolPin(git=git_sha)
-    return ToolPin(version=tool_version or version("skill-dojo"))
+from skill_dojo_core import not_implemented, tool_pin
 
 
 def init(
@@ -43,7 +35,10 @@ def init(
     result = core.init(
         build_context(Path.cwd()),
         name=name,
-        tool=tool_pin(tool_git, tool_version),
+        tool=tool_pin(
+            tool_git,
+            tool_version if tool_git or tool_version else version("skill-dojo"),
+        ),
         repository=repository,
     )
     typer.echo("Created:")
