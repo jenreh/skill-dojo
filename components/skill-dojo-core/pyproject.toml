@@ -1,0 +1,26 @@
+[project]
+name = "skill-dojo-core"
+version = "0.0.0"
+description = "Core library of skill-dojo: curated agent plugin marketplaces in a git repo."
+readme = "README.md"
+authors = [{ name = "Jens Rehpöhler" }]
+license = { text = "MIT" }
+requires-python = ">=3.14"
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.14.4",
+    "ruamel-yaml>=0.19.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/jenreh/skill-dojo"
+Repository = "https://github.com/jenreh/skill-dojo"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"

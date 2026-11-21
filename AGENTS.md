@@ -27,11 +27,11 @@
 <!-- plan:start
 goal: <one line clear goal>
 constraints:
-- Python 3.14; FastAPI; Pydantic 2.14; pydantic-settings;
+- Python 3.14; Typer CLI; Reflex web UI; Pydantic 2.14; ruamel.yaml;
 - logging: no f-strings in logger calls
 - files ≤ 1000 lines; apply design patterns where appropriate
 - minimal diff; add/adjust tests first
-- hexagonal architecture: domain/application/ports/adapters/interfaces
+- three uv workspace packages (core, CLI, web); all logic in core
 definition_of_done:
 - tests pass; coverage ≥ 80%; lint/type checks clean; memory updated
 steps:
@@ -117,37 +117,46 @@ Full rules in **python-coding** skill. Key:
 - Files ≤ 1000 lines.
 - Coverage ≥ 80%.
 - Type annotations on all functions/methods.
-- **Architecture**: hexagonal (domain → application → ports ← adapters; interfaces deliver).
+- **Architecture**: three uv workspace packages, flat modules inside (see §6).
 
 ---
 
-## 6) Architecture Layers
+## 6) Architecture: uv workspace packages
 
 ```
-skit/
-├── ...
+components/
+├── skill-dojo-core/   # dist skill-dojo-core, module skill_dojo_core: all behaviour
+├── skill-dojo-cli/    # dist skill-dojo (console script skill-dojo), module skill_dojo_cli
+└── skill-dojo-web/    # dist skill-dojo-web, module skill_dojo_web (Reflex UI, [web] extra)
+tests/e2e/             # cross-package tests; tests/support has the shared fakes
 ```
 
 Key rules:
 
-- Use-cases import `ports/` only (never `adapters/`).
-- Adapters import `domain/` and their external library only.
-- Composition root is the **only** place that knows both ports and adapters.
+- The boundary is between packages, not layers. No ports/adapters, no composition root.
+  Plain modules by concern, plain functions; classes only where state is needed.
+- `skill_dojo_core` imports neither `typer`, `reflex`, nor the other two packages
+  (a test enforces this). CLI and web contain no business logic and import only from
+  `skill_dojo_core` (its `__init__` is the public API).
+- Every `skill_dojo_core.commands` function takes a `Context` (repo, github, actor, now,
+  progress). Core never reads cwd, env vars or `gh auth`, never prints or prompts.
+  Results are pydantic models; failures are typed errors from `skill_dojo_core.errors`.
+- Writes take the per-repo lock (`repo_lock`, `registry/.lock`).
+- The only test seam is the `GitHub` Protocol (fake in `tests/support`). Git and the
+  filesystem are always real (bare repos under `tmp_path`).
+- `skill-dojo serve` imports `skill_dojo_web` lazily; core + CLI release without web.
 
 ---
 
 ## 7) Security & Config
 
-- No credentials in code/history; `.env` local, SSM/Secrets Manager/Key Vault in prod.
+- No credentials in code/history; `gh auth` locally, GitHub Actions secrets in CI.
 - No default accounts or passwords, also not in migrations. Bind published ports to `127.0.0.1` unless a deployment needs more.
-- Non-secret YAML; env `__` override pattern.
-- Parameterized logs; no sensitive values. No SQL `echo` outside short debugging sessions.
-- `SecretStr` → `.get_secret_value()`.
-- Parameterized SQL only. GitHub event data reaches `run:` scripts through `env:` only.
+- Parameterized logs; no sensitive values.
+- `git`/`gh` run with argument lists, never a shell. GitHub event data reaches `run:` scripts through `env:` only.
 - Pin everything that executes: actions by SHA, images by version, hooks by frozen SHA.
 - Update vulnerable deps; document CVE-driven updates in commits & Memory.
-- UI gates (`requires_admin`) hide markup, they do not authorize. Every handler or REST route that touches protected data checks on the server: `@is_authenticated`, `@requires_admin`, `RequiredSession`.
-- Routes are default-deny. Add a route to `public_routes` only when it must work without a session.
+- The web UI is local only and binds to `127.0.0.1`.
 
 See `SECURITY.md` for the deployment checklist.
 

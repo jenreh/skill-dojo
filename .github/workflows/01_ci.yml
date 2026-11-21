@@ -17,17 +17,6 @@ jobs:
   python:
     name: Lint and test (Python)
     runs-on: ubuntu-latest
-    env:
-      # Importing `app` loads the YAML configuration; the local profile plus
-      # dummy secrets let it resolve without a real database or OAuth app.
-      PROFILES: local
-      SECRET_PROVIDER: local
-      # Names follow the `secret:` references in configuration/config.yaml.
-      COMMON_OAUTH_GITHUB_CLIENT_ID: ci
-      COMMON_OAUTH_GITHUB_CLIENT_SECRET: ci
-      COMMON_OAUTH_AZURE_CLIENT_ID: ci
-      COMMON_OAUTH_AZURE_CLIENT_SECRET: ci
-      COMMON_OAUTH_AZURE_TENANT_ID: ci
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,23 +32,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-packages
 
-      - name: Generate throwaway DB encryption key
-        run: |
-          key="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-          echo "::add-mask::${key}"
-          echo "COMMON_DB_ENCRYPTION_KEY=${key}" >> "$GITHUB_ENV"
-
       - name: Ruff lint
         run: uv run ruff check .
 
       - name: Ruff format
         run: uv run ruff format --check .
 
-      - name: Pytest
-        run: uv run pytest -q
+      - name: Type check
+        run: uv run ty check
 
-  javascript:
-    name: Test (JavaScript)
+      - name: Pytest
+        run: uv run pytest -q --cov
+
+  cli-without-web:
+    name: CLI wheel without the web extra
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -67,10 +53,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          node-version: "24"
+          version: "0.13.8"
 
-      - name: node --test
-        run: node --test "components/*/tests/js/*.test.mjs"
+      - name: Build the core and CLI wheels
+        run: |
+          uv build --package skill-dojo-core --out-dir dist
+          uv build --package skill-dojo --out-dir dist
+
+      - name: Install them into a fresh venv and run the CLI
+        run: |
+          uv venv --python 3.14 /tmp/cli-venv
+          uv pip install --python /tmp/cli-venv/bin/python dist/*.whl
+          /tmp/cli-venv/bin/skill-dojo --version
+          if /tmp/cli-venv/bin/python -c "import reflex" 2>/dev/null; then
+            echo "reflex must not be installed without the web extra" >&2
+            exit 1
+          fi

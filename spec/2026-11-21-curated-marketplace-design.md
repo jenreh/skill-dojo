@@ -4,19 +4,19 @@ Date: 2026-11-21. Status: approved. Next step: the implementation plan.
 
 ## Where things live (decided by the user)
 
-- **The tool is `skit`** (command), in its own repo `jenreh/skill-dojo` at `/Users/jens/Workspace/projekte/skit`. That
-  repo holds the CLI and the web UI. It was created from kit-template and has one
-  initial commit. The `pyproject.toml` names the PyPI package `skill-dojo`, and the console
-  script `skit = "skit.cli.main:app"` is there but commented out.
-- **skit is published to PyPI as `skill-dojo`** (PyPI refused the name `skit`). GitHub Actions in
-  a curated repo run it with `uvx --from skill-dojo==X.Y.Z skit <command>`. No checkout of the tool repo is
+- **The tool is `skill-dojo`** (command), in its own repo `jenreh/skill-dojo` at
+  `/Users/jens/Workspace/projekte/skill-dojo`. That repo holds the CLI and the web UI as
+  three uv workspace packages: `skill-dojo-core` (all logic), `skill-dojo` (the CLI,
+  console script `skill-dojo`) and `skill-dojo-web` (the Reflex UI, the `[web]` extra).
+- **The CLI is published to PyPI as `skill-dojo`**. GitHub Actions in a curated repo run
+  it with `uvx skill-dojo==X.Y.Z <command>`. No checkout of the tool repo is
   needed.
 - **A curated repo is a backend only**: plain files, a catalog, plugins, `registry/` and
-  workflows. **It contains no scripts.** Everything it needs is a `skit` command.
+  workflows. **It contains no scripts.** Everything it needs is a `skill-dojo` command.
 - **This repo (`jenreh/agent-skills`) is the first curated repo.** Adopting it is part of
   the work. Its `scripts/` folder (`validate_skills.py`, `validate_plugins.py`,
-  `codex_metadata.py`, `link-plugins.sh`, `add-skills.sh`) is ported into skit and then
-  deleted. `Taskfile.yml` and `.github/workflows/validate.yml` are switched to `skit`
+  `codex_metadata.py`, `link-plugins.sh`, `add-skills.sh`) is ported into skill-dojo and then
+  deleted. `Taskfile.yml` and `.github/workflows/validate.yml` are switched to `skill-dojo`
   commands, or replaced by the generated workflows.
 
 ## Context and why
@@ -121,7 +121,7 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 │   ├── .claude-plugin/plugin.json       # generated (or symlink, as the jenreh repo does)
 │   ├── skills/ .mcp.json commands/ hooks/ agents/ assets/ ...
 ├── registry/
-│   ├── config.yaml           # namespace, pinned skit version, layout and branding options
+│   ├── config.yaml           # namespace, pinned skill-dojo version, layout and branding options
 │   ├── sources.yaml          # upstream sources, refs, allow-lists, schedule
 │   ├── items.yaml            # what is mirrored/bundled, from where, pinned at what
 │   ├── approvals.yaml        # approval records (reviewer, PR, policy result, time)
@@ -367,7 +367,7 @@ approve/reject/quarantine) · Marketplace preview (the exact catalogs and tree t
 committed) · Releases (promote, tag, release notes) · Clients · Audit (timeline built from
 git).
 
-## Reuse from the jenreh repo (port into skit, then delete here)
+## Reuse from the jenreh repo (port into skill-dojo, then delete here)
 
 - `scripts/validate_plugins.py`: Agent Plugins 1.0 and MCP schema checks (stdlib, mirrors
   `agent-plugins.org/schemas/1.0.0/*`). Port it into the tool's validation module.
@@ -380,15 +380,15 @@ git).
   `validate-marketplace.yml`.
 - `scripts/add-skills.sh`: vendors the marketplace's skills into a *consumer* project
   repo (git subtree into `.agents/agent-skills`, plus `.agents/skills` and
-  `.claude/skills` symlinks). It becomes `skit vendor` (my call).
+  `.claude/skills` symlinks). It becomes `skill-dojo vendor` (my call).
 
 ## Calls made (not decided by the user, please check)
 
-1. **The web UI is an optional extra.** `pip install skill-dojo` / `uvx --from skill-dojo skit` installs only the
+1. **The web UI is an optional extra.** `pip install skill-dojo` / `uvx skill-dojo` installs only the
    CLI (Typer, PyYAML, httpx, and similar). Reflex and appkit-mantine come with
-   `skill-dojo[web]`, which `skit serve` needs. This keeps `uvx` in Actions fast and keeps
+   `skill-dojo[web]`, which `skill-dojo serve` needs. This keeps `uvx` in Actions fast and keeps
    web dependencies out of CI.
-1a. **No database in skit.** The kit-template scaffold brings in Postgres, SQLAlchemy,
+1a. **No database in skill-dojo.** The kit-template scaffold brings in Postgres, SQLAlchemy,
    Alembic and appkit-user (login, roles, `bootstrap_admin.py`). All state lives in the
    curated repo and the UI is local only, so these are removed. Reflex runs without a
    database, and identity comes from `gh auth`. Other template parts (devcontainer,
@@ -415,10 +415,10 @@ git).
    catalogs (another repo, a git URL) are followed and pinned to their own commit. A plugin
    that cannot be represented without rewriting its files is rejected with a clear
    validation error.
-9. **skit is pinned in the curated repo.** `init` writes workflows that run
-   `uvx --from skill-dojo==X.Y.Z skit` at an exact version, also recorded in `registry/config.yaml`. So skit
+9. **skill-dojo is pinned in the curated repo.** `init` writes workflows that run
+   `uvx skill-dojo==X.Y.Z` at an exact version, also recorded in `registry/config.yaml`. So skill-dojo
    has tagged PyPI releases from the start (Trusted Publishing from the skill-dojo repo's CI).
-   Upgrading skit in a curated repo is its own reviewed PR.
+   Upgrading skill-dojo in a curated repo is its own reviewed PR.
 10. **What `build` generates.** Both marketplace catalogs and the missing per-plugin
     manifests. Per-repo branding (icon, brand color, the `extensions.com.openai`
     interface block, `agents/openai.yaml` stubs) is generated only if
@@ -462,11 +462,11 @@ how risk flags are detected, the Reflex page design within appkit-mantine, test 
   Upstream frontmatter and other extensions are unchanged. Both pass the Agent Skills and
   Agent Plugins schema checks.
 - Unit tests per module. An end-to-end test against local fixture git repos (no network).
-- `uvx --from skill-dojo==<released version> skit validate` works in a clean GitHub Actions runner without
+- `uvx skill-dojo==<released version> validate` works in a clean GitHub Actions runner without
   the web extra.
-- **Adopt the jenreh repo:** `skit init --adopt` registers the existing plugins as
+- **Adopt the jenreh repo:** `skill-dojo init --adopt` registers the existing plugins as
   `local` items (and as `mirror`/`bundle` parts where the upstream origin is known), adds
   `registry/`, pins the context7 MCP server, and turns on the symlink layout options.
-  Then `scripts/` is deleted and Taskfile and workflows call `skit`. Afterwards,
-  `skit build && git diff` shows only the intended metadata additions, and
-  `skit validate` passes. Codex and Claude Code still install every plugin.
+  Then `scripts/` is deleted and Taskfile and workflows call `skill-dojo`. Afterwards,
+  `skill-dojo build && git diff` shows only the intended metadata additions, and
+  `skill-dojo validate` passes. Codex and Claude Code still install every plugin.

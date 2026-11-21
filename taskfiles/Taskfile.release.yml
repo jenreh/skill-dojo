@@ -40,8 +40,15 @@ tasks:
       - gh release create v{{.VERSION}} --generate-notes --target "$(git rev-parse HEAD)"
 
   publish:
-    desc: Build and publish all library modules to PyPI
+    desc: |
+      Usage: task release:publish [-- --web]. Builds and publishes skill-dojo-core and
+      skill-dojo; skill-dojo-web only with --web.
+    vars:
+      PACKAGES: >-
+        skill-dojo-core skill-dojo{{if contains "--web" .CLI_ARGS}} skill-dojo-web{{end}}
     cmds:
-      - uv build
-      - uv publish
-      - echo "✅ All modules published successfully"
+      - rm -rf dist
+      - for: { var: PACKAGES, split: " " }
+        cmd: uv build --package {{.ITEM}} --out-dir dist
+      - uv publish dist/*
+      - echo "✅ Published {{.PACKAGES}}"

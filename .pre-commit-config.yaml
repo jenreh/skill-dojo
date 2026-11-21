@@ -31,6 +31,7 @@ repos:
         args: ["--fix=lf"]
       - id: name-tests-test
         args: ["--pytest-test-first"]
+        exclude: '^tests/support/'
   # Every rev is a commit SHA, so a moved tag cannot change the hook code. Dependabot
   # proposes updates after a cooldown; do not run `pre-commit autoupdate` blindly.
   # Betterleaks stays on the stable v1 line (keep it in sync with the CI job).
