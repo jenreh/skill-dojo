@@ -211,8 +211,9 @@ def test_vendor_input_checks(
     ctx = make_context(consumer)
     with pytest.raises(InvalidInputError):
         vendor(ctx, "https://x.invalid/a.git", ref="--upload-pack=evil")
-    with pytest.raises(InvalidInputError):
-        vendor(ctx, "--evil")
+    for url in ("--evil", "ext::sh -c touch% /tmp/pwned", "/abs/path", "http://x/y"):
+        with pytest.raises(InvalidInputError, match="URL"):
+            vendor(ctx, url)
     with pytest.raises(InvalidInputError):
         vendor(ctx, "https://x.invalid/a.git", name="../up")
     with pytest.raises(ConflictError, match="vendor it first"):
