@@ -4,7 +4,7 @@ from typing import Annotated
 
 import typer
 
-from skill_dojo_cli.stub import not_implemented
+from skill_dojo_core import not_implemented
 
 source_app = typer.Typer(help="Manage upstream sources (registry/sources.yaml).")
 

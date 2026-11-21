@@ -1,6 +1,6 @@
 """Shared pytest fixtures for all packages and the end-to-end tests."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,7 +44,7 @@ def fixture_repos(tmp_path: Path) -> FixtureRepos:
 
 
 @pytest.fixture
-def make_context(fake_github: FakeGitHub) -> object:
+def make_context(fake_github: FakeGitHub) -> Callable[..., Context]:
     def make(repo: Path, actor: str = "alice") -> Context:
         return Context(repo=repo, github=fake_github, actor=actor, now=NOW)
 

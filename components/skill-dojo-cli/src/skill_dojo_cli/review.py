@@ -2,7 +2,7 @@
 
 import typer
 
-from skill_dojo_cli.stub import not_implemented
+from skill_dojo_core import not_implemented
 
 review_app = typer.Typer(help="Review candidate PRs into staging.")
 

@@ -1,6 +1,6 @@
 """``promote``, ``release`` and ``revoke``."""
 
-from skill_dojo_cli.stub import not_implemented
+from skill_dojo_core import not_implemented
 
 
 def promote() -> None:

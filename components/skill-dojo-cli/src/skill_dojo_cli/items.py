@@ -4,11 +4,13 @@ from typing import Annotated
 
 import typer
 
-from skill_dojo_cli.stub import not_implemented
+from skill_dojo_core import not_implemented
 
 bundle_app = typer.Typer(help="Build plugins out of parts from several sources.")
 local_app = typer.Typer(help="Register the team's own plugins.")
 lock_app = typer.Typer(help="Maintain registry/lock.json.")
+
+ItemOption = Annotated[str | None, typer.Option(help="Only this item.")]
 
 
 def mirror(source_id: str, plugin: str) -> None:
@@ -17,7 +19,7 @@ def mirror(source_id: str, plugin: str) -> None:
 
 
 def sync(
-    item: Annotated[str | None, typer.Option(help="Only this item.")] = None,
+    item: ItemOption = None,
 ) -> None:
     """Open candidate PRs for upstream changes."""
     not_implemented("sync")
@@ -49,7 +51,7 @@ def local_add(plugin_dir: str) -> None:
 
 @lock_app.command("refresh")
 def lock_refresh(
-    item: Annotated[str | None, typer.Option(help="Only this item.")] = None,
+    item: ItemOption = None,
 ) -> None:
     """Recompute lock entries of local items after an edit."""
     not_implemented("lock refresh")

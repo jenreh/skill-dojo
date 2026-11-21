@@ -1,18 +1,31 @@
 """Map core errors to exit codes."""
 
-from skill_dojo_core import SkillDojoError
+from skill_dojo_core import (
+    ConflictError,
+    ExternalToolError,
+    InvalidInputError,
+    NotFoundError,
+    NotImplementedYetError,
+    PolicyError,
+    RepoLockedError,
+    SkillDojoError,
+    ValidationFailedError,
+)
 
-EXIT_CODES = {
-    "validation_failed": 1,
-    "invalid_input": 2,
-    "not_implemented": 3,
-    "policy": 4,
-    "not_found": 5,
-    "conflict": 6,
-    "repo_locked": 7,
-    "external_tool": 8,
+EXIT_CODES: dict[type[SkillDojoError], int] = {
+    ValidationFailedError: 1,
+    InvalidInputError: 2,
+    NotImplementedYetError: 3,
+    PolicyError: 4,
+    NotFoundError: 5,
+    ConflictError: 6,
+    RepoLockedError: 7,
+    ExternalToolError: 8,
 }
 
 
 def exit_code_for(error: SkillDojoError) -> int:
-    return EXIT_CODES.get(error.code, 1)
+    for error_type, code in EXIT_CODES.items():
+        if isinstance(error, error_type):
+            return code
+    return 1

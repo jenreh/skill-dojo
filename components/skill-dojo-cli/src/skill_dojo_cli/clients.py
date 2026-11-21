@@ -2,7 +2,7 @@
 
 import typer
 
-from skill_dojo_cli.stub import not_implemented
+from skill_dojo_core import not_implemented
 
 clients_app = typer.Typer(help="Keep the hand-kept list of clients.")
 

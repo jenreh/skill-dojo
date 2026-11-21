@@ -36,7 +36,7 @@ class GhCli:
         exe = shutil.which(self.executable)
         if exe is None:
             raise ExternalToolError(f"{self.executable} is not installed")
-        log.debug("Running gh %s", " ".join(args))
+        log.debug("Running gh %s", args[0] if args else "")
         proc = subprocess.run(  # noqa: S603
             [exe, *args],
             cwd=self.cwd,

@@ -29,3 +29,10 @@ def test_main_maps_core_errors_to_exit_codes(
         main()
     assert exc.value.code == 3
     assert "not implemented" in capsys.readouterr().err
+
+
+def test_subclass_uses_its_parents_code() -> None:
+    class Narrow(ValidationFailedError):
+        pass
+
+    assert exit_code_for(Narrow("x")) == 1

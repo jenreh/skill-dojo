@@ -14,6 +14,7 @@ from skill_dojo_core.errors import (
     RepoLockedError,
     SkillDojoError,
     ValidationFailedError,
+    not_implemented,
 )
 from skill_dojo_core.github import GhCli, GitHub
 from skill_dojo_core.repo_lock import repo_lock
@@ -33,5 +34,6 @@ __all__ = [
     "Result",
     "SkillDojoError",
     "ValidationFailedError",
+    "not_implemented",
     "repo_lock",
 ]

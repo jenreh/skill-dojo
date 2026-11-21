@@ -4,7 +4,7 @@ Front ends map ``code`` to their own signal: the CLI to an exit code, a server t
 HTTP status.
 """
 
-from typing import ClassVar
+from typing import ClassVar, NoReturn
 
 
 class SkillDojoError(Exception):
@@ -45,3 +45,8 @@ class ExternalToolError(SkillDojoError):
     """A ``git`` or ``gh`` call failed."""
 
     code = "external_tool"
+
+
+def not_implemented(command: str) -> NoReturn:
+    """Raise for a command whose phase has not landed yet."""
+    raise NotImplementedYetError(f"'{command}' is not implemented yet")
