@@ -6,9 +6,25 @@ import pytest
 from pydantic import BaseModel
 
 import skill_dojo_core
-from skill_dojo_core import Result
+from skill_dojo_core import (
+    BuildResult,
+    Finding,
+    InitResult,
+    LocalAddResult,
+    LockRefreshResult,
+    Result,
+    ValidationReport,
+)
 
-EXAMPLES: list[BaseModel] = []
+FINDING = Finding(level="error", path="plugins/x", message="drift")
+EXAMPLES: list[BaseModel] = [
+    InitResult(created=["registry/config.yaml"]),
+    BuildResult(changed=["a"], applied=False),
+    ValidationReport(plugins=1, skills=2, errors=[FINDING], warnings=[]),
+    FINDING,
+    LocalAddResult(item="x", tree_sha256="a" * 64, changed=["b"]),
+    LockRefreshResult(refreshed=["x"], unchanged=[]),
+]
 
 
 def exported_results() -> set[type[BaseModel]]:
