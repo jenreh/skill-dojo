@@ -52,10 +52,11 @@ def check_openai_yaml(
 
 
 def check_metadata(
-    name: str, data: dict[str, Any], prefix: str, rep: Collector, *, strict: bool
+    name: str, data: dict[str, Any], prefix: str, rep: Collector
 ) -> None:
-    """Own namespaced values must be strings. ``strict`` (editable local items)
-    also makes non-string or non-namespaced metadata keys errors."""
+    """The tool's own values must be strings (error). Other non-string or
+    non-namespaced keys only warn: vendored upstream skills use them and cannot
+    be edited without forking."""
     metadata = data.get("metadata")
     if metadata is None:
         return
@@ -66,10 +67,9 @@ def check_metadata(
         own = str(key).startswith(prefix)
         if not isinstance(value, str):
             message = f"metadata '{key}' must be a string"
-            (rep.error if own or strict else rep.warn)(name, message)
+            (rep.error if own else rep.warn)(name, message)
         if not own and "/" not in str(key):
-            message = f"metadata '{key}' is not namespaced"
-            (rep.error if strict else rep.warn)(name, message)
+            rep.warn(name, f"metadata '{key}' is not namespaced")
 
 
 def validate_skill(
@@ -77,8 +77,6 @@ def validate_skill(
     folder: Path,
     config: RegistryConfig,
     rep: Collector,
-    *,
-    strict: bool = False,
 ) -> None:
     name = folder.relative_to(repo).as_posix()
     skill_md = folder / "SKILL.md"
@@ -122,7 +120,7 @@ def validate_skill(
         rep.error(name, "openai.yaml belongs in agents/openai.yaml")
     stubs = config.branding is not None and config.branding.openai_yaml_stubs
     check_openai_yaml(name, folder, data, rep, required=stubs)
-    check_metadata(name, data, config.namespace.skill, rep, strict=strict)
+    check_metadata(name, data, config.namespace.skill, rep)
     body_lines = len(doc.body.splitlines())
     if body_lines > MAX_BODY_LINES:
         rep.warn(
@@ -162,9 +160,7 @@ def check_skills(
     plugins: list[Path],
     config: RegistryConfig,
     rep: Collector,
-    strict: frozenset[str] = frozenset(),
 ) -> int:
-    """Check every skill; plugins named in ``strict`` are editable local ones."""
     count = 0
     for plugin in plugins:
         root = plugin / "skills"
@@ -174,7 +170,7 @@ def check_skills(
             )
             continue
         for folder in skill_folders(plugin):
-            validate_skill(repo, folder, config, rep, strict=plugin.name in strict)
+            validate_skill(repo, folder, config, rep)
             count += 1
     if config.layout.flat_skills:
         check_flat_view(repo, rep)

@@ -3,6 +3,7 @@
 Front ends (CLI, web UI, a later server) import only from this module.
 """
 
+from skill_dojo_core.commands.adopt import AdoptResult, adopt
 from skill_dojo_core.commands.items import (
     LocalAddResult,
     LockRefreshResult,
@@ -10,6 +11,7 @@ from skill_dojo_core.commands.items import (
     lock_refresh,
 )
 from skill_dojo_core.commands.repo import BuildResult, InitResult, build, init, validate
+from skill_dojo_core.commands.vendor import VendorResult, vendor
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import (
     ConflictError,
@@ -30,6 +32,7 @@ from skill_dojo_core.results import Result
 from skill_dojo_core.validation import Finding, ValidationReport
 
 __all__ = [
+    "AdoptResult",
     "BuildResult",
     "ConflictError",
     "Context",
@@ -50,6 +53,8 @@ __all__ = [
     "ToolPin",
     "ValidationFailedError",
     "ValidationReport",
+    "VendorResult",
+    "adopt",
     "build",
     "init",
     "local_add",
@@ -58,4 +63,5 @@ __all__ = [
     "repo_lock",
     "tool_pin",
     "validate",
+    "vendor",
 ]

@@ -64,6 +64,20 @@ def _prepare(reg: Registry, item: Item) -> set[str]:
     return build.created
 
 
+def register_local(reg: Registry, item: Item, commit: str) -> set[str]:
+    """Add ``item`` to the registry in memory and lock its current files.
+
+    Generates missing manifests and branding on disk first. Returns the paths
+    build generated inside the plugin. The caller saves and builds.
+    """
+    reg.items.items.append(item)
+    generated = _prepare(reg, item)
+    lock = _local_lock(reg, item, generated, commit)
+    lock.generated = sorted(generated)
+    reg.lock.items[item.id] = lock
+    return generated
+
+
 def local_add(
     ctx: Context,
     plugin_dir: str,
@@ -78,11 +92,8 @@ def local_add(
             raise ConflictError(f"'{item_id}' is already in registry/items.yaml")
         commit = git.head(ctx.repo)
         item = Item(id=item_id, kind=ItemKind.LOCAL, category=category)
-        reg.items.items.append(item)
-        generated = _prepare(reg, item)
-        lock = _local_lock(reg, item, generated, commit)
-        lock.generated = sorted(generated)
-        reg.lock.items[item_id] = lock
+        generated = register_local(reg, item, commit)
+        lock = reg.lock.items[item_id]
         reg.save_items()
         reg.save_lock()
         base = builder.plugin_dir(item_id)

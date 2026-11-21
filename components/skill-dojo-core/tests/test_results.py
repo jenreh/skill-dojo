@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import skill_dojo_core
 from skill_dojo_core import (
+    AdoptResult,
     BuildResult,
     Finding,
     InitResult,
@@ -14,6 +15,7 @@ from skill_dojo_core import (
     LockRefreshResult,
     Result,
     ValidationReport,
+    VendorResult,
 )
 
 FINDING = Finding(level="error", path="plugins/x", message="drift")
@@ -24,6 +26,10 @@ EXAMPLES: list[BaseModel] = [
     FINDING,
     LocalAddResult(item="x", tree_sha256="a" * 64, changed=["b"]),
     LockRefreshResult(refreshed=["x"], unchanged=[]),
+    AdoptResult(
+        marketplace="m", items=["x"], changed=[], floating_mcp=[], possibly_vendored=[]
+    ),
+    VendorResult(prefix=".agents/m", ref="main", updated=False, links=[]),
 ]
 
 

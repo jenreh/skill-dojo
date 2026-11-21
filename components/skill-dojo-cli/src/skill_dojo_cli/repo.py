@@ -30,17 +30,25 @@ def init(
     ] = False,
 ) -> None:
     """Scaffold a curated marketplace in this repo."""
-    if adopt:
-        not_implemented("init --adopt")
-    result = core.init(
-        build_context(Path.cwd()),
-        name=name,
-        tool=tool_pin(
-            tool_git,
-            tool_version if tool_git or tool_version else version("skill-dojo"),
-        ),
-        repository=repository,
+    pin = tool_pin(
+        tool_git,
+        tool_version if tool_git or tool_version else version("skill-dojo"),
     )
+    ctx = build_context(Path.cwd())
+    if adopt:
+        adopted = core.adopt(ctx, tool=pin, repository=repository)
+        typer.echo(
+            f"Adopted {len(adopted.items)} plugin(s) into '{adopted.marketplace}'."
+        )
+        echo_lines(adopted.changed)
+        if adopted.floating_mcp:
+            typer.echo("\nFloating MCP references (pin them, then 'lock refresh'):")
+            echo_lines(adopted.floating_mcp)
+        if adopted.possibly_vendored:
+            typer.echo("\nSkills with their own license (likely from upstream):")
+            echo_lines(adopted.possibly_vendored)
+        return
+    result = core.init(ctx, name=name, tool=pin, repository=repository)
     typer.echo("Created:")
     echo_lines(result.created)
 
@@ -78,8 +86,19 @@ def flags(
 
 
 def vendor(
-    marketplace: Annotated[str, typer.Argument(help="Marketplace git URL.")] = "",
+    marketplace: Annotated[str, typer.Argument(help="Marketplace git URL.")],
+    ref: Annotated[
+        str, typer.Option(help="Branch or release tag, e.g. marketplace-v2026.11.21.")
+    ] = "main",
+    name: Annotated[
+        str | None, typer.Option(help="Folder under .agents/ (default: repo name).")
+    ] = None,
     update: Annotated[bool, typer.Option(help="Pull the subtree again.")] = False,
 ) -> None:
     """Vendor a marketplace's skills into this (consumer) repo."""
-    not_implemented("vendor")
+    result = core.vendor(
+        build_context(Path.cwd()), marketplace, ref=ref, name=name, update=update
+    )
+    verb = "Updated" if result.updated else "Vendored"
+    typer.echo(f"{verb} {result.prefix} at {result.ref}.")
+    echo_lines(result.links)
