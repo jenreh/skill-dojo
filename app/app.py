@@ -9,35 +9,34 @@ from appkit_user.authentication.pages import (  # noqa: F401
     azure_oauth_callback_page,
     github_oauth_callback_page,
 )
-from appkit_user.authentication.templates import navbar_layout
+from appkit_user.authentication.templates import authenticated_page
+from appkit_user.user_management.components import user_profile_view
 from appkit_user.user_management.pages import (
     create_login_page,
     create_password_reset_confirm_page,
     create_password_reset_request_page,
-    create_profile_page,
 )
 from starlette.types import ASGIApp
 
-from app.components.navbar import app_navbar
+from app.components.templates import default_layout, navbar_template
 from app.pages.users import users_page  # noqa: F401
 from app.styles import base_style, base_stylesheets
 
-create_login_page()
-create_profile_page(
-    app_navbar(),
-    class_name="w-full gap-6 max-w-[800px]",
-    padding="2rem",
-)
-create_password_reset_request_page()
-create_password_reset_confirm_page()
+create_login_page(default_layout)
+create_password_reset_request_page(default_layout)
+create_password_reset_confirm_page(default_layout)
 
 
-@navbar_layout(
+@authenticated_page(route="/profile", title="Profil", template=navbar_template)
+def profile() -> rx.Component:
+    return user_profile_view(w="100%", maw="800px", gap="lg", p="2rem")
+
+
+@authenticated_page(
     route="/index",
     title="ProjectKit",
     description="The ProjectKit Homepage",
-    navbar=app_navbar(),
-    with_header=False,
+    template=navbar_template,
 )
 def index() -> rx.Component:
     return rx.container(

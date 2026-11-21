@@ -1,7 +1,7 @@
 import appkit_mantine as mn
 import reflex as rx
 from appkit_user.authentication.components.components import requires_admin
-from appkit_user.authentication.templates import authenticated
+from appkit_user.authentication.templates import authenticated_page
 from appkit_user.user_management.components.user import (
     add_user_button,
     add_user_modal,
@@ -11,14 +11,14 @@ from appkit_user.user_management.components.user import (
 )
 from appkit_user.user_management.states.user_states import UserState
 
-from app.components.navbar import app_navbar
+from app.components.templates import navbar_template
 from app.roles import ALL_ROLES
 
 
-@authenticated(
+@authenticated_page(
     route="/admin/users",
     title="Benutzerverwaltung",
-    navbar=app_navbar(),
+    template=navbar_template,
     admin_only=True,
     # ty cannot model reflex event-handler calls; suppress the false positives.
     on_load=[UserState.set_available_roles(ALL_ROLES)],  # ty: ignore[invalid-argument-type]
