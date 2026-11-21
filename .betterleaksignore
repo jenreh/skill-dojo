@@ -1,0 +1,3 @@
+# Throwaway dev-container database password from the kit-template initial commit.
+# The file no longer has a database service; the value was never a real secret.
+456a5913fe71abd771ce945d0bd32f1503d369c8:.devcontainer/docker-compose.yml:generic-password:33
