@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from skill_dojo_core.catalogs import AGENTS_CATALOG, CLAUDE_CATALOG
+from skill_dojo_core.hashing import list_files
 from skill_dojo_core.models import Layout
 from skill_dojo_core.validation.mcp_pins import floating_reference
 from skill_dojo_core.validation.report import Collector
@@ -89,9 +90,9 @@ def check_manifest(repo: Path, plugin: Path, layout: Layout, rep: Collector) -> 
             rep.error(name, "not the same file as .claude-plugin/plugin.json")
         else:
             other = load_json(claude, plugin, label(repo, claude), rep) or {}
-            for key in ("name", "version"):
-                if other.get(key) != data.get(key):
-                    rep.error(name, f"'{key}' differs from .claude-plugin/plugin.json")
+            keys = (set(data) | set(other)) - {"$schema"}
+            for key in sorted(k for k in keys if other.get(k) != data.get(k)):
+                rep.error(name, f"'{key}' differs from .claude-plugin/plugin.json")
 
     if data.get("$schema") != PLUGIN_SCHEMA:
         rep.error(name, f"$schema must be '{PLUGIN_SCHEMA}'")
@@ -195,15 +196,19 @@ def check_server(name: str, server_name: str, server: Any, rep: Collector) -> No
 
 
 def check_mcp(repo: Path, plugin: Path, layout: Layout, rep: Collector) -> None:
+    """``mcp.json`` (Agent Plugins) and ``.mcp.json`` (Claude Code), both checked."""
     path = plugin / "mcp.json"
     claude = plugin / ".mcp.json"
     name = label(repo, path)
     if not path.exists():
         if claude.is_file():
             rep.error(name, "missing next to .mcp.json (run 'skill-dojo build')")
+            check_servers(
+                label(repo, claude),
+                load_json(claude, plugin, label(repo, claude), rep),
+                rep,
+            )
         return
-    if claude.is_file() and path.resolve() != claude.resolve() and layout.mcp_symlink:
-        rep.error(name, "not the same file as .mcp.json")
     data = load_json(path, plugin, name, rep)
     if data is None:
         return
@@ -211,12 +216,38 @@ def check_mcp(repo: Path, plugin: Path, layout: Layout, rep: Collector) -> None:
         rep.error(name, f"$schema must be '{MCP_SCHEMA}'")
     for field in sorted(set(data) - {"$schema", "mcpServers"}):
         rep.error(name, f"'{field}' is not allowed by the spec")
+    check_servers(name, data, rep)
+    if claude.is_file() and path.resolve() != claude.resolve():
+        claude_name = label(repo, claude)
+        if layout.mcp_symlink:
+            rep.error(name, "not the same file as .mcp.json")
+        other = load_json(claude, plugin, claude_name, rep)
+        if other is not None and other.get("mcpServers") != data.get("mcpServers"):
+            rep.error(claude_name, "mcpServers differ from mcp.json")
+            check_servers(claude_name, other, rep)
+
+
+def check_servers(name: str, data: Any, rep: Collector) -> None:
+    if data is None:
+        return
     servers = data.get("mcpServers")
     if not isinstance(servers, dict):
         rep.error(name, "'mcpServers' is required and must be an object")
         return
     for server_name, server in servers.items():
         check_server(name, server_name, server, rep)
+
+
+def check_symlinks(repo: Path, plugin: Path, rep: Collector) -> None:
+    """Every symlink in a plugin resolves inside the plugin root."""
+    root = plugin.resolve()
+    for rel in list_files(plugin):
+        path = plugin / rel
+        if not path.is_symlink():
+            continue
+        target = path.resolve()
+        if target != root and root not in target.parents:
+            rep.error(label(repo, path), "symlink points outside the plugin")
 
 
 def check_openai_interface(repo: Path, plugin: Path, rep: Collector) -> None:
@@ -324,5 +355,6 @@ def check_plugins(
         check_manifest(repo, plugin, layout, rep)
         check_mcp(repo, plugin, layout, rep)
         check_openai_interface(repo, plugin, rep)
+        check_symlinks(repo, plugin, rep)
     check_claude_catalog(repo, plugins, rep)
     check_agents_catalog(repo, plugins, rep)

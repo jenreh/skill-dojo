@@ -97,12 +97,14 @@ def normalized_sha256(rel: str, data: bytes, namespace: Namespace) -> str | None
     return sha256_bytes(normalized) if normalized is not None else None
 
 
-def hash_file(root: Path, rel: str, namespace: Namespace) -> FileLock:
-    path = root / rel
-    data = raw_bytes(path)
-    mode = file_mode(path)
+def file_lock_for(rel: str, data: bytes, mode: str, namespace: Namespace) -> FileLock:
     normalized = None if mode == "120000" else normalized_sha256(rel, data, namespace)
     return FileLock(mode=mode, sha256=sha256_bytes(data), normalized_sha256=normalized)
+
+
+def hash_file(root: Path, rel: str, namespace: Namespace) -> FileLock:
+    path = root / rel
+    return file_lock_for(rel, raw_bytes(path), file_mode(path), namespace)
 
 
 def _git_files(root: Path) -> list[str] | None:

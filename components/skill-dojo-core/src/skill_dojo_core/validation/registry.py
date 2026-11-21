@@ -57,7 +57,7 @@ def current_files(reg: Registry, item: Item, lock: ItemLock) -> dict[str, object
     return {
         rel: value
         for rel, value in hashing.hash_tree(root, reg.config.namespace).items()
-        if not is_generated(rel, lock.files, reg.config)
+        if not is_generated(rel, lock)
     }
 
 

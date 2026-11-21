@@ -58,15 +58,10 @@ def _prepare(reg: Registry, item: Item) -> set[str]:
     out of the lock entry.
     """
     overlay = Overlay(reg.repo)
-    builder.PluginBuild(reg, overlay, item).run()
-    base = builder.plugin_dir(item.id) + "/"
-    created = {
-        rel.removeprefix(base)
-        for rel in overlay.changes()
-        if rel.startswith(base) and not (reg.repo / rel).exists()
-    }
+    build = builder.PluginBuild(reg, overlay, item)
+    build.run()
     overlay.apply()
-    return created
+    return build.created
 
 
 def local_add(
@@ -86,10 +81,14 @@ def local_add(
         reg.items.items.append(item)
         generated = _prepare(reg, item)
         lock = _local_lock(reg, item, generated, commit)
+        lock.generated = sorted(generated)
         reg.lock.items[item_id] = lock
         reg.save_items()
         reg.save_lock()
-        changed = sorted({*builder.apply_build(reg), *generated})
+        base = builder.plugin_dir(item_id)
+        changed = sorted(
+            {*builder.apply_build(reg), *(f"{base}/{rel}" for rel in generated)}
+        )
     ctx.report(f"Added local item '{item_id}'")
     log.info("Added local item %s", item_id)
     return LocalAddResult(item=item_id, tree_sha256=lock.tree_sha256, changed=changed)
@@ -114,14 +113,9 @@ def lock_refresh(ctx: Context, *, item: str | None = None) -> LockRefreshResult:
         refreshed, unchanged = [], []
         for target in targets:
             old = reg.lock.items.get(target.id)
-            root = ctx.repo / builder.plugin_dir(target.id)
-            listed = hashing.list_files(root)
-            exclude = {
-                rel
-                for rel in listed
-                if builder.is_generated(rel, old.files if old else None, reg.config)
-            }
+            exclude = set(old.generated) if old else set()
             new = _local_lock(reg, target, exclude, commit)
+            new.generated = sorted(exclude)
             if old is not None and old.tree_sha256 == new.tree_sha256:
                 unchanged.append(target.id)
                 continue

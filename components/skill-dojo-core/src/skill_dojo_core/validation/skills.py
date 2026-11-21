@@ -28,11 +28,12 @@ def yaml_value(text: str, key: str) -> str | None:
 
 
 def check_openai_yaml(
-    name: str, folder: Path, data: dict[str, Any], rep: Collector
+    name: str, folder: Path, data: dict[str, Any], rep: Collector, *, required: bool
 ) -> None:
     path = folder / "agents" / "openai.yaml"
     if not path.is_file():
-        rep.error(name, "no agents/openai.yaml (run 'skill-dojo build')")
+        if required:
+            rep.error(name, "no agents/openai.yaml (run 'skill-dojo build')")
         return
     text = path.read_text(encoding="utf-8")
     implicit = yaml_value(text, "allow_implicit_invocation") or "true"
@@ -51,8 +52,10 @@ def check_openai_yaml(
 
 
 def check_metadata(
-    name: str, data: dict[str, Any], prefix: str, rep: Collector
+    name: str, data: dict[str, Any], prefix: str, rep: Collector, *, strict: bool
 ) -> None:
+    """Own namespaced values must be strings. ``strict`` (editable local items)
+    also makes non-string or non-namespaced metadata keys errors."""
     metadata = data.get("metadata")
     if metadata is None:
         return
@@ -63,13 +66,19 @@ def check_metadata(
         own = str(key).startswith(prefix)
         if not isinstance(value, str):
             message = f"metadata '{key}' must be a string"
-            (rep.error if own else rep.warn)(name, message)
+            (rep.error if own or strict else rep.warn)(name, message)
         if not own and "/" not in str(key):
-            rep.warn(name, f"metadata '{key}' is not namespaced")
+            message = f"metadata '{key}' is not namespaced"
+            (rep.error if strict else rep.warn)(name, message)
 
 
 def validate_skill(
-    repo: Path, folder: Path, config: RegistryConfig, rep: Collector
+    repo: Path,
+    folder: Path,
+    config: RegistryConfig,
+    rep: Collector,
+    *,
+    strict: bool = False,
 ) -> None:
     name = folder.relative_to(repo).as_posix()
     skill_md = folder / "SKILL.md"
@@ -111,9 +120,9 @@ def validate_skill(
         rep.warn(name, "allowed-tools pre-approves every Bash command; narrow it")
     if (folder / "openai.yaml").exists():
         rep.error(name, "openai.yaml belongs in agents/openai.yaml")
-    if config.branding is not None and config.branding.openai_yaml_stubs:
-        check_openai_yaml(name, folder, data, rep)
-    check_metadata(name, data, config.namespace.skill, rep)
+    stubs = config.branding is not None and config.branding.openai_yaml_stubs
+    check_openai_yaml(name, folder, data, rep, required=stubs)
+    check_metadata(name, data, config.namespace.skill, rep, strict=strict)
     body_lines = len(doc.body.splitlines())
     if body_lines > MAX_BODY_LINES:
         rep.warn(
@@ -149,8 +158,13 @@ def check_flat_view(repo: Path, rep: Collector) -> None:
 
 
 def check_skills(
-    repo: Path, plugins: list[Path], config: RegistryConfig, rep: Collector
+    repo: Path,
+    plugins: list[Path],
+    config: RegistryConfig,
+    rep: Collector,
+    strict: frozenset[str] = frozenset(),
 ) -> int:
+    """Check every skill; plugins named in ``strict`` are editable local ones."""
     count = 0
     for plugin in plugins:
         root = plugin / "skills"
@@ -160,7 +174,7 @@ def check_skills(
             )
             continue
         for folder in skill_folders(plugin):
-            validate_skill(repo, folder, config, rep)
+            validate_skill(repo, folder, config, rep, strict=plugin.name in strict)
             count += 1
     if config.layout.flat_skills:
         check_flat_view(repo, rep)

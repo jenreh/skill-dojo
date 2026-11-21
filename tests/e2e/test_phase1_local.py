@@ -244,3 +244,104 @@ def test_hand_added_mcp_config_is_locked_not_generated(curated: Context) -> None
     assert errors(curated) == []
     (curated.repo / "plugins/hello/.mcp.json").write_text(json.dumps({**mcp, "x": 1}))
     assert any(".mcp.json: drift: changed" in e for e in errors(curated))
+
+
+MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+
+
+def test_floating_ref_in_claude_mcp_file_fails(curated: Context) -> None:
+    pinned = {"type": "stdio", "command": "npx", "args": ["pkg@1.0.0"]}
+    floating = {"type": "stdio", "command": "uvx", "args": ["evil"]}
+    add_plugin(
+        curated.repo,
+        **{
+            "mcp.json": json.dumps(
+                {"$schema": MCP_SCHEMA, "mcpServers": {"a": pinned}}
+            ),
+            ".mcp.json": json.dumps({"mcpServers": {"a": floating}}),
+        },
+    )
+    local_add(curated, "plugins/hello")
+    found = errors(curated)
+    assert any(".mcp.json: mcpServers differ" in e for e in found)
+    assert any(".mcp.json: server 'a' floats" in e for e in found)
+
+
+def test_user_written_openai_yaml_is_kept(curated: Context) -> None:
+    config = registry_path(curated.repo, "config.yaml")
+    config.write_text(config.read_text() + "branding:\n  brand_color: '#000000'\n")
+    add_plugin(curated.repo)
+    local_add(curated, "plugins/hello")
+    own = curated.repo / "plugins/hello/skills/own/agents/openai.yaml"
+    write_tree(
+        curated.repo,
+        {
+            "plugins/hello/skills/own/SKILL.md": skill_md(
+                "own", "Own skill for testing it."
+            ),
+            "plugins/hello/skills/own/agents/openai.yaml": "policy:\n  allow_implicit_invocation: false\n",
+        },
+    )
+    assert any("own/agents/openai.yaml: drift: extra" in e for e in errors(curated))
+    lock_refresh(curated)
+    assert "allow_implicit_invocation: false" in own.read_text()
+    assert errors(curated) == []
+
+
+def test_branding_turned_on_later_is_not_drift(curated: Context) -> None:
+    add_plugin(curated.repo)
+    local_add(curated, "plugins/hello")
+    config = registry_path(curated.repo, "config.yaml")
+    config.write_text(config.read_text() + "branding:\n  developer_name: Acme\n")
+    build(curated)
+    assert errors(curated) == []
+    assert build(curated, check=True).changed == []
+    manifest = json.loads((curated.repo / "plugins/hello/plugin.json").read_text())
+    assert manifest["extensions"]["com.openai"]["interface"]["developerName"] == "Acme"
+
+
+def test_branding_does_not_absorb_a_hand_edit(curated: Context) -> None:
+    add_plugin(curated.repo)
+    local_add(curated, "plugins/hello")
+    manifest = curated.repo / "plugins/hello/plugin.json"
+    manifest.write_text(manifest.read_text().replace('"1.0.0"', '"9.9.9"'))
+    config = registry_path(curated.repo, "config.yaml")
+    config.write_text(config.read_text() + "branding:\n  developer_name: Acme\n")
+    build(curated)
+    assert any("plugin.json: drift: changed" in e for e in errors(curated))
+
+
+def test_tool_pin_change_regenerates_workflow(curated: Context) -> None:
+    config = registry_path(curated.repo, "config.yaml")
+    config.write_text(config.read_text().replace("0" * 40, "1" * 40))
+    assert (
+        ".github/workflows/validate-marketplace.yml"
+        in build(curated, check=True).changed
+    )
+    build(curated)
+    workflow = (curated.repo / ".github/workflows/validate-marketplace.yml").read_text()
+    assert "1" * 40 in workflow
+
+
+def test_symlink_outside_plugin_fails(curated: Context, tmp_path: Path) -> None:
+    add_plugin(curated.repo)
+    (curated.repo / "plugins/hello/skills/greet/pw").symlink_to("/etc/hosts")
+    local_add(curated, "plugins/hello")
+    assert any("symlink points outside" in e for e in errors(curated))
+
+
+def test_local_skill_metadata_is_strict(curated: Context) -> None:
+    add_plugin(curated.repo)
+    skill = curated.repo / "plugins/hello/skills/greet/SKILL.md"
+    skill.write_text(
+        skill.read_text().replace("---\n\n", "metadata:\n  author: me\n---\n\n", 1)
+    )
+    local_add(curated, "plugins/hello")
+    assert any("'author' is not namespaced" in e for e in errors(curated))
+
+
+def test_local_add_lists_repo_paths(curated: Context) -> None:
+    add_plugin(curated.repo)
+    result = local_add(curated, "plugins/hello")
+    assert all(p.startswith(("plugins/", ".", "registry/")) for p in result.changed)
+    assert "plugins/hello/.claude-plugin/plugin.json" in result.changed

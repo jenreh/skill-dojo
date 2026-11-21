@@ -350,6 +350,10 @@ class ItemLock(CamelModel):
     parts: list[PartLock] = Field(default_factory=list)
     tree_sha256: Sha256
     files: dict[str, FileLock]
+    generated: list[str] = Field(
+        default_factory=list,
+        description="Paths build generated (not upstream content, not hashed)",
+    )
 
 
 class LockFile(CamelModel):
