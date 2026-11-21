@@ -1,9 +1,13 @@
 """Item commands: ``mirror``, ``bundle``, ``local``, ``lock`` and ``sync``."""
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
+import skill_dojo_core as core
+from skill_dojo_cli.context import build_context
+from skill_dojo_cli.output import echo_lines
 from skill_dojo_core import not_implemented
 
 bundle_app = typer.Typer(help="Build plugins out of parts from several sources.")
@@ -44,9 +48,14 @@ def bundle_remove(name: str, part: str) -> None:
 
 
 @local_app.command("add")
-def local_add(plugin_dir: str) -> None:
+def local_add(
+    plugin_dir: Annotated[str, typer.Argument(help="A folder in plugins/.")],
+    category: Annotated[str | None, typer.Option(help="Catalog category.")] = None,
+) -> None:
     """Register a local plugin directory."""
-    not_implemented("local add")
+    result = core.local_add(build_context(Path.cwd()), plugin_dir, category=category)
+    typer.echo(f"Added '{result.item}' (treeSha256 {result.tree_sha256[:12]}).")
+    echo_lines(result.changed)
 
 
 @lock_app.command("refresh")
@@ -54,4 +63,9 @@ def lock_refresh(
     item: ItemOption = None,
 ) -> None:
     """Recompute lock entries of local items after an edit."""
-    not_implemented("lock refresh")
+    result = core.lock_refresh(build_context(Path.cwd()), item=item)
+    if not result.refreshed:
+        typer.echo("All lock entries are current.")
+        return
+    typer.echo("Refreshed:")
+    echo_lines(result.refreshed)

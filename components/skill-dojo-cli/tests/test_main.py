@@ -47,7 +47,6 @@ def test_every_command_has_help(name: str) -> None:
 
 
 STUBS = [
-    ["init"],
     ["source", "add", "x", "o/r"],
     ["source", "list"],
     ["source", "remove", "x"],
@@ -56,8 +55,6 @@ STUBS = [
     ["bundle", "create", "b"],
     ["bundle", "add", "b", "x:p/skill/s"],
     ["bundle", "remove", "b", "x:p/skill/s"],
-    ["local", "add", "plugins/p"],
-    ["lock", "refresh"],
     ["sync"],
     ["review", "list"],
     ["review", "show", "1"],
@@ -67,8 +64,6 @@ STUBS = [
     ["promote"],
     ["release"],
     ["revoke", "x"],
-    ["build"],
-    ["validate"],
     ["flags"],
     ["clients", "add", "c", "main"],
     ["clients", "list"],
