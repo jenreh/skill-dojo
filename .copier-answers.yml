@@ -8,7 +8,7 @@ author_name: Jens Rehpöhler
 coding_agents:
 - claude
 create_github_repo: true
-db_name: skit-db
+db_name: skill-dojo-db
 github_owner: jenreh
 github_visibility: public
 include_docker: false
@@ -17,7 +17,7 @@ include_graph: false
 include_terraform: false
 project_description: Manages agent plugin marketplaces, skills, and MCP servers in
     a git repo.
-project_name: skit
+project_name: skill-dojo
 project_type: reflex
 python_version: '3.14'
 use_devcontainer: true

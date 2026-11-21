@@ -9,7 +9,7 @@ reflex:
 
 app:
   version: 1.0.1
-  name: skit
+  name: skill-dojo
   logging: logging.prod.yaml
   environment: production
   backend_timeout: 180 # seconds

@@ -1,6 +1,6 @@
 <div align="center">
 
-# skit
+# skill-dojo
 
   **Manages agent plugin marketplaces, skills, and MCP servers in a git repo.**
 

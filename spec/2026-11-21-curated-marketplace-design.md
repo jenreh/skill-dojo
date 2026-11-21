@@ -4,12 +4,12 @@ Date: 2026-11-21. Status: approved. Next step: the implementation plan.
 
 ## Where things live (decided by the user)
 
-- **The tool is `skit`**, in its own repo at `/Users/jens/Workspace/projekte/skit`. That
+- **The tool is `skit`** (command), in its own repo `jenreh/skill-dojo` at `/Users/jens/Workspace/projekte/skit`. That
   repo holds the CLI and the web UI. It was created from kit-template and has one
-  initial commit. The `pyproject.toml` already names the package `skit`, and the console
+  initial commit. The `pyproject.toml` names the PyPI package `skill-dojo`, and the console
   script `skit = "skit.cli.main:app"` is there but commented out.
-- **skit is published to PyPI** (the name `skit` was free on 2026-11-21). GitHub Actions in
-  a curated repo run it with `uvx skit==X.Y.Z <command>`. No checkout of the tool repo is
+- **skit is published to PyPI as `skill-dojo`** (PyPI refused the name `skit`). GitHub Actions in
+  a curated repo run it with `uvx --from skill-dojo==X.Y.Z skit <command>`. No checkout of the tool repo is
   needed.
 - **A curated repo is a backend only**: plain files, a catalog, plugins, `registry/` and
   workflows. **It contains no scripts.** Everything it needs is a `skit` command.
@@ -358,7 +358,7 @@ inform the reviewer. They never block on their own. Blocking is the job of the
 PRs), `review list|show|approve|reject|quarantine`, `promote`, `release`, `build`
 (regenerate catalogs and layout), `validate`, `clients add|list`, `revoke`,
 `vendor` (consumer side, replaces `add-skills.sh`), `init [--adopt]`, `serve` (needs
-`skit[web]`).
+`skill-dojo[web]`).
 
 ## Web UI pages (local, `serve`)
 
@@ -384,9 +384,9 @@ git).
 
 ## Calls made (not decided by the user, please check)
 
-1. **The web UI is an optional extra.** `pip install skit` / `uvx skit` installs only the
+1. **The web UI is an optional extra.** `pip install skill-dojo` / `uvx --from skill-dojo skit` installs only the
    CLI (Typer, PyYAML, httpx, and similar). Reflex and appkit-mantine come with
-   `skit[web]`, which `skit serve` needs. This keeps `uvx skit` in Actions fast and keeps
+   `skill-dojo[web]`, which `skit serve` needs. This keeps `uvx` in Actions fast and keeps
    web dependencies out of CI.
 1a. **No database in skit.** The kit-template scaffold brings in Postgres, SQLAlchemy,
    Alembic and appkit-user (login, roles, `bootstrap_admin.py`). All state lives in the
@@ -416,8 +416,8 @@ git).
    that cannot be represented without rewriting its files is rejected with a clear
    validation error.
 9. **skit is pinned in the curated repo.** `init` writes workflows that run
-   `uvx skit==X.Y.Z` at an exact version, also recorded in `registry/config.yaml`. So skit
-   has tagged PyPI releases from the start (Trusted Publishing from the skit repo's CI).
+   `uvx --from skill-dojo==X.Y.Z skit` at an exact version, also recorded in `registry/config.yaml`. So skit
+   has tagged PyPI releases from the start (Trusted Publishing from the skill-dojo repo's CI).
    Upgrading skit in a curated repo is its own reviewed PR.
 10. **What `build` generates.** Both marketplace catalogs and the missing per-plugin
     manifests. Per-repo branding (icon, brand color, the `extensions.com.openai`
@@ -462,7 +462,7 @@ how risk flags are detected, the Reflex page design within appkit-mantine, test 
   Upstream frontmatter and other extensions are unchanged. Both pass the Agent Skills and
   Agent Plugins schema checks.
 - Unit tests per module. An end-to-end test against local fixture git repos (no network).
-- `uvx skit==<released version> validate` works in a clean GitHub Actions runner without
+- `uvx --from skill-dojo==<released version> skit validate` works in a clean GitHub Actions runner without
   the web extra.
 - **Adopt the jenreh repo:** `skit init --adopt` registers the existing plugins as
   `local` items (and as `mirror`/`bundle` parts where the upstream origin is known), adds

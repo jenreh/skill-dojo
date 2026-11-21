@@ -15,7 +15,7 @@ app:
 
   database:
     host: db
-    name: skit-db
+    name: skill-dojo-db
 
   authentication:
     server_url: http://localhost

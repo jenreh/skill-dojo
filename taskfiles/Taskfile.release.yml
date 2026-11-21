@@ -26,9 +26,9 @@ tasks:
       # Only the bumped, tracked files: never sweep stray untracked files into a release.
       - git add -u
       # A separate task, so VERSION is read after the bump.
-      - task: publish
+      - task: push
 
-  publish:
+  push:
     internal: true
     vars:
       VERSION:
@@ -38,3 +38,10 @@ tasks:
       - git push
       # Tag the commit just pushed, not whatever the default branch points to.
       - gh release create v{{.VERSION}} --generate-notes --target "$(git rev-parse HEAD)"
+
+  publish:
+    desc: Build and publish all library modules to PyPI
+    cmds:
+      - uv build
+      - uv publish
+      - echo "✅ All modules published successfully"

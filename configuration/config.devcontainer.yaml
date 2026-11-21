@@ -15,7 +15,7 @@ app:
     host: db
     port: 5432
     echo: False # True also logs bound values such as password hashes and tokens
-    name: skit-db
+    name: skill-dojo-db
 
   authentication:
     server_url: http://localhost

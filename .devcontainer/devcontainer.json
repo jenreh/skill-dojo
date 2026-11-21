@@ -1,15 +1,15 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	"name": "skit-dev",
+	"name": "skill-dojo-dev",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "app",
 	"remoteUser": "vscode",
-	"workspaceFolder": "/workspaces/skit",
+	"workspaceFolder": "/workspaces/skill-dojo",
 	"containerEnv": {
-		"WORKSPACE": "/workspaces/skit",
+		"WORKSPACE": "/workspaces/skill-dojo",
 		"UV_PROJECT_ENVIRONMENT": ".venv",
-		"VIRTUAL_ENV": "/workspaces/skit/.venv",
+		"VIRTUAL_ENV": "/workspaces/skill-dojo/.venv",
 		// The uv cache volume and the workspace are different filesystems
 		"UV_LINK_MODE": "copy",
 		// Keep .claude.json inside the persisted ~/.claude volume

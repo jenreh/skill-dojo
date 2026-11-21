@@ -1,7 +1,7 @@
 services:
   app:
-    container_name: skit-dev
-    image: skit/ui-dev
+    container_name: skill-dojo-dev
+    image: skill-dojo/ui-dev
     build:
       # The Dockerfile copies nothing, so only send this folder as build context
       context: .
@@ -11,16 +11,16 @@ services:
     volumes:
       # Only this project: sibling repos and their .env files stay out of reach of
       # the tools and coding agents running in the container.
-      - ..:/workspaces/skit:rw,cached
+      - ..:/workspaces/skill-dojo:rw,cached
       # Survives rebuilds: uv, pre-commit and antidote caches, uv-managed Python and
       # tools, claude logins and plugins (symlinked, see Dockerfile)
       - dev-state:/home/vscode/.persist
     command: sleep infinity
     networks:
-      - skit-network
+      - skill-dojo-network
 
   db:
-    container_name: skit-dev-db
+    container_name: skill-dojo-dev-db
     image: pgvector/pgvector:0.8.7-pg18-trixie
     restart: unless-stopped
     volumes:
@@ -28,20 +28,20 @@ services:
       - dev-postgres-data:/var/lib/postgresql
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_DB: skit-db
+      POSTGRES_DB: skill-dojo-db
       # Development only: throwaway credentials, reachable from this machine alone.
       POSTGRES_PASSWORD: postgres
     ports:
       - "127.0.0.1:5434:5432"
     networks:
-      - skit-network
+      - skill-dojo-network
 
 networks:
-  skit-network:
+  skill-dojo-network:
     driver: bridge
 
 volumes:
   dev-state:
-    name: skit-dev-state
+    name: skill-dojo-dev-state
   dev-postgres-data:
-    name: skit-dev-postgres-data
+    name: skill-dojo-dev-postgres-data

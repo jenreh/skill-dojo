@@ -1,5 +1,5 @@
 [project]
-name = "skit"
+name = "skill-dojo"
 version = "0.0.0"
 description = "Manages agent plugin marketplaces, skills, and MCP servers in a git repo."
 readme = "README.md"
@@ -41,8 +41,8 @@ dev = [
 # skit-mcp = "skit.mcp_server.server:main"
 
 [project.urls]
-Homepage = "https://github.com/jenreh/skit"
-Repository = "https://github.com/jenreh/skit"
+Homepage = "https://github.com/jenreh/skill-dojo"
+Repository = "https://github.com/jenreh/skill-dojo"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
