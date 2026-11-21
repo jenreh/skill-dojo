@@ -1,0 +1,40 @@
+<div align="center">
+
+# skit
+
+  **Manages agent plugin marketplaces, skills, and MCP servers in a git repo.**
+
+  ![Version](https://img.shields.io/badge/version-1.0.0-blue)
+  [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE.md)
+  [![Python](https://img.shields.io/badge/python-3.14%2B-orange)](https://www.python.org)
+  [![Reflex](https://img.shields.io/badge/reflex-0.10.1-purple)](https://reflex.dev)
+
+  [Getting Started](#project-initialization) • [Branching](#branching)
+
+</div>
+
+---
+
+## Project Initialization
+
+Before initializing the project, install these required tools:
+
+1. `uv`: [installation instructions](https://docs.astral.sh/uv/getting-started/installation/)
+2. `task`: [installation instructions](https://taskfile.dev/installation/)
+
+After both tools are installed, run:
+
+```sh
+task init
+```
+
+This installs the required Python version, syncs dependencies, and installs the pre-commit hooks.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the secure defaults and the checklist to go through
+before a deployment.
+
+## Branching
+
+See [BRANCHING.md](BRANCHING.md) for the repository branch naming policy.

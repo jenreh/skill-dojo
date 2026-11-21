@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+# Every taskfile under ./taskfiles/ is shipped with the project. This block is
+# the switchboard: an include is active when uncommented and inert when
+# commented. Enable a feature later by uncommenting its block (and providing the
+# files it needs, e.g. terraform/, alembic/). Copier pre-selected the set below
+# from the answers you gave when the project was generated.
+includes:
+  qa:
+    taskfile: ./taskfiles/Taskfile.qa.yml
+    flatten: true
+    vars:
+      PROJECT: "{{.PROJECT}}"
+  release: ./taskfiles/Taskfile.release.yml
+
+  reflex:
+    taskfile: ./taskfiles/Taskfile.reflex.yml
+    flatten: true
+
+  db:
+    taskfile: ./taskfiles/Taskfile.db.yml
+
+  # docker:
+  #   taskfile: ./taskfiles/Taskfile.docker.yml
+  #   vars:
+  #     IMAGE_NAME: "{{.PROJECT}}-image"
+
+  # dev:
+  #   taskfile: ./taskfiles/Taskfile.terraform.yaml
+  #   vars:
+  #     TF_DIR: "{{.ROOT_DIR}}/terraform"
+  #     ENVIRONMENT: dev
+  # prod:
+  #   taskfile: ./taskfiles/Taskfile.terraform.yaml
+  #   vars:
+  #     TF_DIR: "{{.ROOT_DIR}}/terraform"
+  #     ENVIRONMENT: prod
+
+silent: true
+
+vars:
+  # Derived from the wheel package declared in pyproject.toml, so it always
+  # matches the real package name (no template substitution needed here).
+  # Shell built-ins only (no awk/grep/sed), so it also runs on Windows, where
+  # Task's shell has just a small set of core utils.
+  PROJECT:
+    sh: |
+      while IFS= read -r line; do
+        case "$line" in
+          'packages = ['*) p="${line#*\"}"; printf '%s' "${p%%\"*}"; break ;;
+        esac
+      done < pyproject.toml
+
+tasks:
+  default:
+    desc: Show available commands
+    cmd: task --list
+
+  # ----------------------------------------------------------------------------
+  # Project Initialization and Dependency Management
+  # ----------------------------------------------------------------------------
+
+  init:
+    desc: Initialize project (install python, sync deps, install pre-commit hooks, agent plugins)
+    vars:
+      # The version Copier pinned in .python-version. Trailing junk such as a
+      # Windows "\r" is cut off, so only digits and dots are kept. read also
+      # fails on a file without a final newline, so only an empty v is an error.
+      PYTHON_VERSION:
+        sh: |
+          IFS= read -r v < .python-version || [ -n "$v" ]
+          printf '%s' "${v%%[!0-9.]*}"
+    cmds:
+      - echo "🐍 Installing Python {{.PYTHON_VERSION}}..."
+      - uv python install {{.PYTHON_VERSION}}
+      - echo "📦 Syncing dependencies..."
+      - task: sync
+      - git rev-parse --git-dir >/dev/null 2>&1 || git init -b main
+      # Hooks stay on the reviewed SHAs in .pre-commit-config.yaml; Dependabot updates them.
+      - echo "🔒 Installing pre-commit hooks..."
+      - uv run pre-commit install --install-hooks
+      - task: agents:plugins
+
+  agents:plugins:
+    desc: Install the agent plugins from .claude/settings.json (claude)
+    cmd: uv run --no-sync python scripts/install_agent_plugins.py
+
+  sync:
+    desc: Install all dependencies (including the dev group) with uv
+    aliases: [install]
+    cmd: uv sync
+
+  upgrade:
+    desc: Upgrade all dependencies to the latest versions pyproject.toml allows, then sync and audit
+    cmds:
+      - echo "⬆️  Upgrading uv.lock..."
+      - uv lock --upgrade
+      - |
+        for f in components/*/pyproject.toml; do
+          [ -f "$f" ] || continue
+          echo "⬆️  Upgrading ${f%/*}/uv.lock..."
+          uv lock --upgrade --project "${f%/*}"
+        done
+      - echo "📦 Syncing dependencies..."
+      - task: sync
+      - echo "🔍 Auditing the upgraded dependencies..."
+      - task: audit
+      - echo "✅ Done. Review the uv.lock diff, then run task lint and task test."
+
+  clean:
+    desc: Clean cache and build artifacts
+    ignore_error: true
+    cmds:
+      - rm -rf __pycache__/ .cache/ .state/ .web/ dist/ build/ coverage.xml .coverage
+      # Plain -type/-name only: Task's built-in find on Windows has no -exec or -delete.
+      # A read loop (not xargs) keeps paths with spaces intact.
+      - find . -type d -name "__pycache__" | while IFS= read -r d; do rm -rf "$d"; done
+      - find . -type f -name "*.pyc" | while IFS= read -r f; do rm -f "$f"; done

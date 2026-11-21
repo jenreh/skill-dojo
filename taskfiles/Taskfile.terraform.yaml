@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+vars:
+  TFVARS: "{{.TF_DIR}}/{{.ENVIRONMENT}}.auto.tfvars"
+  # The script checks the Azure login itself and starts it when needed.
+  DEPLOY: "uv run --no-sync python {{.TF_DIR}}/deploy.py"
+
+tasks:
+  # ----------------------------------------------------------------------------
+  # Terraform Commands (Namespace: tf) - Azure
+  # ----------------------------------------------------------------------------
+  status:
+    desc: Show current deployment status
+    cmd: "{{.DEPLOY}} status"
+
+  bootstrap:
+    desc: Create state storage infrastructure in Azure (only run once)
+    requires:
+      vars: [TFVARS]
+    cmd: "{{.DEPLOY}} bootstrap --tfvars {{.TFVARS}} {{.CLI_ARGS}}"
+
+  migrate:
+    desc: Deploy and update main infrastructure
+    requires:
+      vars: [TFVARS]
+    cmd: "{{.DEPLOY}} migrate --tfvars {{.TFVARS}} {{.CLI_ARGS}}"
+
+  destroy:
+    desc: Destroy all infrastructure (⚠️  destructive)
+    requires:
+      vars: [TFVARS]
+    cmd: "{{.DEPLOY}} cleanup --tfvars {{.TFVARS}} {{.CLI_ARGS}}"

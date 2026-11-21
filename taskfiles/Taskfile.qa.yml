@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+silent: true
+
+vars:
+  RUNNER: uv run
+  # App package plus every component source dir (components/*/src).
+  SRC_DIRS:
+    sh: |
+      printf '%s' "{{.PROJECT}}"
+      for d in components/*/src; do if [ -d "$d" ]; then printf ' %s' "$d"; fi; done
+
+tasks:
+  # ----------------------------------------------------------------------------
+  # Quality Assurance (Tests, Lint, Format)
+  # ----------------------------------------------------------------------------
+
+  test:
+    desc: Run pytest with coverage
+    cmd: "{{.RUNNER}} pytest --cov"
+
+  lint:
+    desc: Run linting with ruff and type checking with ty
+    cmds:
+      - task: format
+      - task: typecheck
+
+  format:
+    desc: Format code with ruff
+    cmds:
+      - "{{.RUNNER}} ruff check --fix {{.SRC_DIRS}}"
+      - "{{.RUNNER}} ruff format {{.SRC_DIRS}}"
+
+  typecheck:
+    desc: Run ty type checking
+    cmd: "{{.RUNNER}} ty check {{.SRC_DIRS}}"
+
+  pre-commit:
+    desc: Run all pre-commit hooks (incl. betterleaks) on every file
+    cmd: "{{.RUNNER}} pre-commit run --all-files"
+
+  audit:
+    desc: Check the locked dependencies for known vulnerabilities
+    cmds:
+      - uv audit --frozen
+      - |
+        for f in components/*/pyproject.toml; do
+          [ -f "$f" ] || continue
+          echo "Auditing $f"
+          uv audit --frozen --project "${f%/*}"
+        done

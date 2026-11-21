@@ -1,0 +1,230 @@
+[project]
+name = "skit"
+version = "1.0.0"
+description = "Manages agent plugin marketplaces, skills, and MCP servers in a git repo."
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "MIT" }
+authors = [{ name = "Jens Rehpöhler" }]
+keywords = []
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+dependencies = [
+    "appkit-user>=1.19.1",
+    "appkit-mantine>=1.19.1",
+    "psycopg[binary,pool]>=3.3.9",
+    "reflex>=0.11.0",
+    "sqlalchemy>=2.1.8",
+    "alembic>=1.20.1",
+]
+
+[dependency-groups]
+dev = [
+    "bump-my-version>=1.8.1",
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "pytest-cov>=7.1.0",
+    "pytest-httpserver>=1.2.1",
+    "ruff>=0.17.5",
+    "ty>=0.0.104",
+    "types-PyYAML>=6.0.12.20261113",
+]
+
+[project.scripts]
+# skit = "skit.cli.main:app"
+# skit-mcp = "skit.mcp_server.server:main"
+
+[project.urls]
+Homepage = "https://github.com/jenreh/skit"
+Repository = "https://github.com/jenreh/skit"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/app",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.bumpversion]
+commit = false
+current_version = "1.0.0"
+tag = false
+allow-dirty = false
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "configuration/config.yaml"
+search = 'version: {current_version}'
+replace = 'version: {new_version}'
+[tool.ruff]
+cache-dir = ".cache/ruff"
+indent-width = 4
+line-length = 88
+target-version = "py314"
+extend-exclude = [
+    ".agents",
+    ".cache",
+    ".claude",
+    ".devcontainer",
+    ".github",
+    ".vscode",
+    "build",
+    "dist",
+    "docs",
+]
+
+[tool.ruff.lint]
+extend-select = ["I"]
+ignore = [
+    "EM101",
+    "EM102",
+    "ISC001",
+    "N811",
+    "N818",
+    "PLR0913",
+    "PT011",
+    "PT012",
+    "RUF012",
+    "RUF100",
+    "SIM300",
+    "E501",
+    "B008",
+    "ASYNC240",
+    "PYI034",
+    "S101",
+    "PLR0912",
+    "ASYNC109",
+    "ARG001",
+    "PLR2004",
+    "PLW0603",
+    "PLC0415",
+    "SIM105",
+    "PLW2901",
+    "PLR0911",
+    "B017",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+select = [
+    "A",
+    "ANN001",
+    "ANN201",
+    "ARG",
+    "ASYNC",
+    "B",
+    "C4",
+    "DTZ",
+    "E",
+    "EM",
+    "EXE",
+    "F",
+    "FIX",
+    "G",
+    "ICN",
+    "LOG",
+    "N",
+    "PERF",
+    "PIE",
+    "PL",
+    "PT",
+    "PTH",
+    "PYI",
+    "Q",
+    "RET",
+    "RUF",
+    "S",
+    "SIM",
+    "SLF",
+    "SLF001",
+    "T20",
+    "TID",
+    "UP",
+    "W",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "I001"]
+"test_**.py" = [
+    "S101",
+    "PLR2004",
+    "ANN001",
+    "S106",
+    "SLF001",
+    "RET504",
+    "PERF401",
+    "E402",
+    "S501",
+    "S110",
+    "ARG002",
+    "ARG005",
+    "E741",
+    "RUF059",
+]
+# Command line scripts print their output and run tools with fixed arguments.
+"{scripts,terraform}/*.py" = ["T201", "S603", "S607"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+exclude = ["*.pyi"]
+
+[tool.ruff.lint.isort]
+known-local-folder = ["app"]
+
+[tool.pytest.ini_options]
+cache_dir = ".cache/pytest"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+# Type checking with `ty` (Astral). Run via `task typecheck` (uv run ty check).
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+exclude = [
+    ".agents",
+    ".cache",
+    ".claude",
+    ".venv",
+    "alembic/versions",
+    "build",
+    "dist",
+]
+
+# Treat unresolved third-party imports as errors-off-by-default like mypy's
+# ignore_missing_imports; ty resolves imports from the project venv instead.
+[tool.ty.rules]
+import-not-found = "warn"
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+omit = []
+
+[tool.coverage.report]
+exclude_lines = ["if TYPE_CHECKING:", "if __name__ == .__main__.:", "pragma: no cover"]
+fail_under = 80
+show_missing = true
+skip_covered = true
+
+[build-system]
+requires = ["hatchling>=1.33.0"]
+build-backend = "hatchling.build"

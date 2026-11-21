@@ -1,0 +1,157 @@
+# ─── Editors / IDEs / notebooks ──────────────────────────────────────────────
+.idea/
+.ipynb_checkpoints
+.ropeproject
+.spyderproject
+.spyproject
+ipython_config.py
+profile_default/
+
+# ─── Virtual environments ────────────────────────────────────────────────────
+__pypackages__/
+.pdm.toml
+.Python
+.venv
+.venv.mac
+env.bak/
+env/
+ENV/
+Pipfile
+venv.bak/
+venv/
+
+# ─── Python caches & build artifacts ─────────────────────────────────────────
+__pycache__/
+.dmypy.json
+.eggs/
+.installed.cfg
+.mypy_cache/
+.pybuilder/
+.pyre/
+.python_packages
+.pytype/
+*.egg
+*.egg-info/
+*.manifest
+*.py[cod]
+*.so
+*.spec
+*$py.class
+build/
+cython_debug/
+develop-eggs/
+dist/
+dmypy.json
+downloads/
+eggs/
+lib/
+lib64/
+MANIFEST
+parts/
+pip-delete-this-directory.txt
+pip-log.txt
+sdist/
+share/python-wheels/
+target/
+var/
+wheels/
+
+# ─── Test / coverage ──────────────────────────────────────────────────────────
+.coverage
+.coverage.*
+.hypothesis/
+.nox/
+.pytest_cache/
+.tox/
+*.cover
+*.py,cover
+cover/
+coverage.xml
+htmlcov/
+nosetests.xml
+tests/mcp_test.py
+
+# ─── Local env, logs, scratch ────────────────────────────────────────────────
+.cache
+.DS_Store
+.env
+.env.*
+.env_*
+# Must come after the .env patterns above, or it is ignored again.
+!.env.default
+*.bak
+*.kv-env.*
+*.log
+out
+sketchpad/
+tmp.txt
+
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+# Keys, certificates and keystores
+.netrc
+.npmrc
+.pypirc
+*.asc
+*.gpg
+*.jks
+*.key
+*.keystore
+*.p12
+*.p8
+*.pem
+*.pfx
+*.ppk
+*credentials*.json
+*service-account*.json
+id_dsa*
+id_ecdsa*
+id_ed25519*
+id_rsa*
+kubeconfig
+secrets.*
+# Credential and token files
+.aws/
+# Local agent settings (may hold tokens or personal permissions)
+.claude/settings.local.json
+# Database dumps
+*.dump
+*.sql
+
+# ─── Framework / tool artifacts ──────────────────────────────────────────────
+.scrapy
+.webassets-cache
+*.db
+*.mo
+*.pot
+*.sage.py
+celerybeat-schedule
+celerybeat.pid
+db.sqlite3
+db.sqlite3-journal
+instance/
+local_settings.py
+local.settings.json
+
+# ─── Docs ─────────────────────────────────────────────────────────────────────
+/site
+docs/_build/
+
+# ─── Terraform / infra (generated) ───────────────────────────────────────────
+*.tfplan
+*.tfstate
+*.tfstate.*.backup
+*.tfstate.backup
+*.tfvars
+**/.terraform/*
+backend_config.json
+backend.prod.hcl
+
+# ─── reflex.dev build artifacts ──────────────────────────────────────────────
+.web
+.states
+assets/external/
+
+# ─── App data / uploads ──────────────────────────────────────────────────────
+stores/
+uploaded_files/
+uploads/

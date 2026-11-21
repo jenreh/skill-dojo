@@ -1,0 +1,32 @@
+profile: devcontainer
+
+reflex:
+  deploy_url: http://localhost:8080
+  api_url: http://localhost:3030
+  frontend_port: 8080
+  backend_port: 3030
+  workers: 1
+
+app:
+  environment: devcontainer
+  logging: logging.yaml
+
+  database:
+    host: db
+    port: 5432
+    echo: False # True also logs bound values such as password hashes and tokens
+    name: skit-db
+
+  authentication:
+    server_url: http://localhost
+    server_port: 8080
+
+    # Leave redirect_url unset: it is derived from server_url and frontend_path.
+    # oauth_providers:
+    # - provider: "github"
+    #   client_id: secret:common-oauth-github-client-id
+    #   client_secret: secret:common-oauth-github-client-secret
+    # - provider: "azure"
+    #   client_id: secret:common-oauth-azure-client-id
+    #   client_secret: secret:common-oauth-azure-client-secret
+    #   tenant_id: secret:common-oauth-azure-tenant-id

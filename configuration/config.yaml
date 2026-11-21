@@ -1,0 +1,59 @@
+profile: default
+
+reflex:
+  deploy_url: https://localhost:8080
+  api_url: https://localhost:3030
+  frontend_port: 8080
+  backend_port: 3030
+  workers: 1
+
+app:
+  version: 1.0.0
+  name: skit
+  logging: logging.prod.yaml
+  environment: production
+  backend_timeout: 180 # seconds
+
+  database:
+    username: secret:mn-db-user
+    password: secret:mn-db-password
+    host: secret:mn-db-host
+    port: 5432
+    name: secret:mn-db-name
+    encryption_key: secret:mn-db-encryption-key
+    pool_size: 10 # change only when needed
+    max_overflow: 30 # change only when needed
+    echo: False # Set to True to enable SQL logging
+
+  authentication:
+    session_timeout: 25 # minutes
+    auth_token_refresh_delta: 10 # minutes
+    server_url: https://localhost
+    server_port: 8080
+    session_filter_enabled: true # guards websocket events, page loads and REST routes
+    session_cookie_secure: true # browsers exempt localhost, so local http still works
+
+    # Everything not listed here needs a session. The list is matched without any
+    # frontend_path prefix.
+    public_routes:
+      - /login
+      - /password-reset
+      - /password-reset/confirm
+      - /oauth/*/callback
+
+    login_rate_limit:
+      enabled: true
+      max_attempts: 5
+      max_attempts_per_client: 20
+      window_minutes: 15
+      lockout_minutes: 15
+
+    # Leave redirect_url unset: it is derived from server_url and frontend_path.
+    #oauth_providers:
+    # - provider: "github"
+    #   client_id: secret:common-oauth-github-client-id
+    #   client_secret: secret:common-oauth-github-client-secret
+    # - provider: "azure"
+    #   client_id: secret:common-oauth-azure-client-id
+    #   client_secret: secret:common-oauth-azure-client-secret
+    #   tenant_id: secret:common-oauth-azure-tenant-id

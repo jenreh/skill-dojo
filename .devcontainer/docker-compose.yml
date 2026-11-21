@@ -1,0 +1,47 @@
+services:
+  app:
+    container_name: skit-dev
+    image: skit/ui-dev
+    build:
+      # The Dockerfile copies nothing, so only send this folder as build context
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VARIANT: 3.14-trixie
+    volumes:
+      # Only this project: sibling repos and their .env files stay out of reach of
+      # the tools and coding agents running in the container.
+      - ..:/workspaces/skit:rw,cached
+      # Survives rebuilds: uv, pre-commit and antidote caches, uv-managed Python and
+      # tools, claude logins and plugins (symlinked, see Dockerfile)
+      - dev-state:/home/vscode/.persist
+    command: sleep infinity
+    networks:
+      - skit-network
+
+  db:
+    container_name: skit-dev-db
+    image: pgvector/pgvector:0.8.7-pg18-trixie
+    restart: unless-stopped
+    volumes:
+      # PostgreSQL 18 images keep their data in a versioned subdirectory of this path.
+      - dev-postgres-data:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: skit-db
+      # Development only: throwaway credentials, reachable from this machine alone.
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5434:5432"
+    networks:
+      - skit-network
+
+networks:
+  skit-network:
+    driver: bridge
+
+volumes:
+  dev-state:
+    name: skit-dev-state
+  dev-postgres-data:
+    name: skit-dev-postgres-data
