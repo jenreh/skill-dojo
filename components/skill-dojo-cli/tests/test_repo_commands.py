@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import pytest
+from pytest_httpserver import HTTPServer
 from typer.testing import CliRunner, Result
 
 from skill_dojo_cli.main import app
 from tests.support.fake_github import FakeGitHub
+from tests.support.fake_mcp_registry import FakeMcpRegistry, npm
 from tests.support.fixture_repos import (
     FixtureRepos,
     agent_plugin_manifest,
@@ -125,3 +127,23 @@ def test_source_mirror_sync_flags_commands(
     assert "## Risk flags" in invoke("flags").output
     invoke("source", "add", "spare", ap.url)
     assert "Removed" in invoke("source", "remove", "spare").output
+
+
+def test_mcp_registry_browse_and_mirror(
+    repo: Path, httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeGitHub()
+    monkeypatch.setattr("skill_dojo_cli.context.GhCli", lambda cwd: fake)
+    registry = FakeMcpRegistry(httpserver)
+    registry.publish("io.github.acme/weather", "1.0.0", [npm("weather", "1.0.0")])
+    registry.publish("io.github.acme/remote", "1.0.0")
+    invoke("init", "--name", "acme", "--tool-git", "1" * 40)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "init")
+    git(repo, "push", "-q", "origin", "HEAD:staging")
+    added = invoke("source", "add", "mcp", registry.url, "--type", "mcp_registry")
+    assert added.exit_code == 0, added.output
+    listed = invoke("browse", "mcp", "--search", "acme").output
+    assert "io.github.acme/weather 1.0.0" in listed
+    assert "cannot mirror" in listed
+    assert "weather: opened" in invoke("mirror", "mcp", "io.github.acme/weather").output

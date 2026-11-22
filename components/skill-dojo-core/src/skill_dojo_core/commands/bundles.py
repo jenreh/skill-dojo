@@ -70,8 +70,10 @@ from skill_dojo_core.validation import validate_registry
 
 log = logging.getLogger(__name__)
 
+# ``plugin`` may be an MCP Registry server name, which holds one ``/``.
 PART_RE = re.compile(
-    r"^(?:(?P<source>[a-z0-9][a-z0-9.-]*):(?P<plugin>[a-z0-9][a-z0-9.-]*)/)?"
+    r"^(?:(?P<source>[a-z0-9][a-z0-9.-]*):"
+    r"(?P<plugin>[A-Za-z0-9][A-Za-z0-9.-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?)/)?"
     r"(?P<kind>skill|agent|mcp_server)/(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)$"
 )
 FIRST_VERSION = "0.1.0"
@@ -204,7 +206,8 @@ def check_no_links(root: Path) -> None:
 
 
 def license_dir(spec: PartSpec) -> str:
-    return f"licenses/{spec.source}-{spec.plugin}"
+    plugin = (spec.plugin or "").replace("/", "-")
+    return f"licenses/{spec.source}-{plugin}"
 
 
 # --- the bundle tree ---------------------------------------------------------------

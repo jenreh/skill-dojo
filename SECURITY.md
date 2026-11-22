@@ -27,3 +27,16 @@ this repository, or contact the maintainers directly.
       for an existing repo) sets up branch protection with the `02 Security checks` jobs
       required, Dependabot, secret scanning with push protection, a CodeQL merge gate,
       AI Scan and private vulnerability reporting.
+
+## MCP Registry sources
+
+- Registry and container registry calls use https only (plain http only to
+  `localhost`), follow no redirects and send no credentials; an OCI pull token is
+  the anonymous one the registry hands out.
+- Only stdio packages from npmjs.org, pypi.org or an OCI registry are pinned: npm and
+  PyPI to an exact version, images to the sha256 of the manifest the tool downloaded
+  (checked against `Docker-Content-Digest`). Ranges, `latest`, other package
+  registries and remote-only servers are refused.
+- Package names, image references and environment variable names are checked before
+  they reach `.mcp.json`, so a registry entry cannot inject command-line options.
+  Secrets are never copied: environment variables become `${NAME}` placeholders.
