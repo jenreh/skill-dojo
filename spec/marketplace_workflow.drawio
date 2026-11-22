@@ -1,0 +1,136 @@
+<mxfile host="Electron">
+  <diagram name="Agent Plugin Mirroring" id="zvX7mTHQNZ-7MxwM9bpA">
+    <mxGraphModel dx="2179" dy="735" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-28" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;defaultLabelBackgroundColor=page;labelPadding=0 4;" target="xKqvgXKHiKVW89dFcsHO-27">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-1" parent="1" style="shape=mxgraph.bpmn.shape;perimeter=ellipsePerimeter;outline=standard;symbol=general;fillColor=#d5e8d4;strokeColor=#82b366;" value="Start" vertex="1">
+          <mxGeometry height="40" width="40" x="40" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="1. Add agent-plugins marketplace" vertex="1">
+          <mxGeometry height="70" width="170" x="120" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="2. Cache marketplace data" vertex="1">
+          <mxGeometry height="70" width="170" x="330" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="3. Show available plugins" vertex="1">
+          <mxGeometry height="70" width="170" x="540" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-5" parent="1" style="shape=mxgraph.bpmn.shape;perimeter=rhombusPerimeter;outline=none;symbol=exclusiveGw;fillColor=#fff2cc;strokeColor=#d6b656;whiteSpace=wrap;html=1;" value="Choose mirroring mode?" vertex="1">
+          <mxGeometry height="60" width="60" x="760" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#ffe6cc;strokeColor=#d79b00;" value="4a. Select plugin to mirror as plugin to registry" vertex="1">
+          <mxGeometry height="80" width="200" x="690" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#ffe6cc;strokeColor=#d79b00;" value="4b1. Select plugin" vertex="1">
+          <mxGeometry height="70" width="170" x="705" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#ffe6cc;strokeColor=#d79b00;" value="4b2. Show available skills, agents, MCP, hooks" vertex="1">
+          <mxGeometry height="70" width="200" x="940" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#ffe6cc;strokeColor=#d79b00;" value="4b3. Select parts to mirror" vertex="1">
+          <mxGeometry height="70" width="170" x="1190" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-37" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;defaultLabelBackgroundColor=page;labelPadding=0 4;exitX=0.217;exitY=0.993;exitDx=0;exitDy=0;exitPerimeter=0;dashed=1;" target="xKqvgXKHiKVW89dFcsHO-29">
+          <mxGeometry relative="1" x="0.0559" as="geometry">
+            <Array as="points">
+              <mxPoint x="1190.1" y="260.5" />
+              <mxPoint x="410" y="260.5" />
+            </Array>
+            <mxPoint x="1134" y="235" as="sourcePoint" />
+            <mxPoint x="419" y="484" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#ffe6cc;strokeColor=#d79b00;" value="4b4. Add selected parts to existing plugin or create a new plugin in registry" vertex="1">
+          <mxGeometry height="70" width="300" x="1125" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Add plugin to registry" vertex="1">
+          <mxGeometry height="70" width="170" x="1495" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Registry updated" vertex="1">
+          <mxGeometry height="70" width="170" x="1750" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-13" parent="1" style="shape=mxgraph.bpmn.shape;perimeter=ellipsePerimeter;outline=end;symbol=terminate;fillColor=#f8cecc;strokeColor=#b85450;" value="End" vertex="1">
+          <mxGeometry height="40" width="40" x="1970" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-14" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-1" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-15" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-2" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-16" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-3" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-17" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-4" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-18" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-5" style="endArrow=classic;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="xKqvgXKHiKVW89dFcsHO-6" value="4a: Mirror whole plugin">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-19" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-5" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="xKqvgXKHiKVW89dFcsHO-7" value="4b: Mirror selected parts">
+          <mxGeometry relative="1" x="-0.5714" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-20" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-6" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-21" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-7" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="xKqvgXKHiKVW89dFcsHO-8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-22" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-8" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-23" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-9" style="endArrow=classic;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="xKqvgXKHiKVW89dFcsHO-10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-24" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-10" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="xKqvgXKHiKVW89dFcsHO-11">
+          <mxGeometry relative="1" x="0.2285" as="geometry">
+            <Array as="points">
+              <mxPoint x="1580" y="175" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-25" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-11" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-26" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-12" style="endArrow=classic;html=1;" target="xKqvgXKHiKVW89dFcsHO-13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-30" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-27" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;labelPadding=0 4;" target="xKqvgXKHiKVW89dFcsHO-29" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-27" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=20;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="1. Add new plugin" vertex="1">
+          <mxGeometry height="70" width="170" x="120" y="419" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-32" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;labelPadding=0 4;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="xKqvgXKHiKVW89dFcsHO-33" value="">
+          <mxGeometry relative="1" x="-0.2453" as="geometry">
+            <mxPoint x="550" y="396" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-29" parent="1" style="whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;arcSize=20;" value="Create new plugin directory with metadata" vertex="1">
+          <mxGeometry height="60" width="120" x="350" y="424" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-35" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-33" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;labelPadding=0 4;" target="xKqvgXKHiKVW89dFcsHO-34" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-33" parent="1" style="whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=20;" value="Add files manually in the directory" vertex="1">
+          <mxGeometry height="60" width="120" x="722" y="424" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-36" edge="1" parent="1" source="xKqvgXKHiKVW89dFcsHO-34" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;defaultLabelBackgroundColor=page;labelPadding=0 4;" target="xKqvgXKHiKVW89dFcsHO-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-34" parent="1" style="whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;arcSize=20;" value="Generate plugin and marketplace metadata for new files" vertex="1">
+          <mxGeometry height="60" width="120" x="1110" y="424" as="geometry" />
+        </mxCell>
+        <mxCell id="xKqvgXKHiKVW89dFcsHO-38" parent="1" style="text;overflow=hidden;rounded=0;spacing=0;whiteSpace=wrap;align=center;" value="can use empty plugins created earlier" vertex="1">
+          <mxGeometry height="40" width="149" x="971" y="220" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

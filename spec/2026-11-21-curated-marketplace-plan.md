@@ -274,6 +274,10 @@ Codex and Claude Code still install every plugin (manual check with
 
 ## Phase 3: Sources, mirror, candidate PRs and sync
 
+> **Superseded by Phase 8** (2026-11-22): steps 4 and 5 (candidate branches, PRs into
+> `staging`, `flags --base staging`) are replaced by commits on the one work branch and
+> one PR into `main`. Sources, fetching, normalizing and risk flags stay.
+
 Goal: the gate works for single upstream plugins and for local changes.
 
 1. **`source add|list|remove`** and **`browse <source>`** with catalog readers for
@@ -307,6 +311,11 @@ opens an update PR showing the diff and flags; changed local skill without `lock
 fails validate.
 
 ## Phase 4: Bundles, review, promote, release, revoke, clients
+
+> **Superseded by Phase 8** (2026-11-22): bundles become parts of local plugins;
+> `review`, `promote`, `approvals.yaml`, approval stamps and channel policy are removed;
+> `release` adds a GitHub Release; `revoke` is a change on the work branch. `clients`
+> stays.
 
 Goal: the full lifecycle from candidate to tag, with policy enforcement.
 
@@ -364,6 +373,10 @@ branch suffix is the sha256 of the pin. Bundle parts name the server:
 
 ## Phase 6: Local web UI (`serve`, `[web]` extra)
 
+> **Partly superseded by Phase 8** (2026-11-22): the review queue and the bundles page
+> are replaced by the Changes and Plugins pages; the Releases page loses promote.
+> Serving, theme and page layout stay.
+
 Package `skill-dojo-web`. Reflex + appkit-mantine (use `reflex-state-and-architecture`,
 `appkit-mantine-reference`, `frontend-design` skills). States build a `Context` once per
 session and call the same `skill_dojo_core` functions as the CLI; no logic in state
@@ -405,6 +418,49 @@ in a browser against a fixture repo; an automated Playwright run is still open.
    confirm `uvx skill-dojo==X.Y.Z validate` on a clean runner without the web extra.
 6. Prove the release split once: a patch release of core + CLI only, then
    `uv tool install "skill-dojo[web]==X.Y.Z+1"` still resolves the previous web release.
+
+## Phase 8: Work-branch rework
+
+Basis: `spec/2026-11-22-work-branch-rework-prompt.md` and the design (rev. 2).
+
+Goal: editing a curated registry follows one simple flow. Add a source (cached), browse,
+mirror a whole plugin or pick parts into a new or existing local plugin, or create a
+plugin and drop files in. Every change is a commit on one work branch in the admin's
+checkout; `finish` opens one PR into `main`; after the merge a manual `release` tags
+and creates a GitHub Release. Versions are kept by the tool.
+
+1. **Spec first**: design rev. 2 and this phase.
+2. **Models and migration**: kinds `mirror` and `local` (`bundle` read as `local`);
+   part kind `hook`; `config.work_branch`; `approvals.yaml`, `channels`, `reviewers`,
+   `supported_channels` and approval stamps removed (ignored on read, removed by
+   `build`).
+3. **Work branch** (`branches.py`): `ensure_work_branch` at the start of every writing
+   command, one commit per command, never a force-push.
+4. **Cache** (`cache.py`): `.skill-dojo/cache/` ignores itself; `source add`, `browse
+   [--refresh]`, `source refresh` and `sync` keep it current; cached checkouts are reused
+   only at the exact commit.
+5. **Plugins** (`commands/plugins.py`): `plugin new`, `add-parts [--create]`,
+   `remove-parts`; hook parts; parts from the reused bundle code.
+6. **Mirror and sync** on the work branch; `sync` skips quarantined items.
+7. **Versions** (`versions.py`, `commands/versions.py`): auto patch bump in `build`,
+   `version` override, `pending_versions` for `finish` and the UI.
+8. **Work** (`commands/work.py`): `status`, `finish [--level] [--no-pr]`.
+9. **Release and revoke**: GitHub Release through `GitHub.create_release`; revoke on the
+   work branch.
+10. **Workflows**: validate on `main` and PRs into `main` (flags job there); sync runs
+    `sync` then `finish`. The pin-skew rule stays.
+11. **Web UI**: Changes, Sources, Plugins and Releases pages; review and bundles pages
+    removed.
+12. **Remove**: `commands/promote.py`, `commands/review.py`, `commands/bundles.py`,
+    candidate branch helpers, CLI `review`, `promote` and `bundle`.
+
+Done: unit tests per new core module; an e2e test walks the whole flow (add source →
+browse → mirror → add parts to a new plugin → `plugin new` + hand-added skill + build →
+finish: one PR, versions bumped, mirror keeps its upstream version → merge → the next
+edit creates a fresh work branch → sync reuses the open work branch → release creates
+the tag and the GitHub Release); a migration test for an old repo with `bundle` items
+and `approvals.yaml`; web state tests for the new pages; `task test` green with coverage
+≥ 80 %, `task lint` clean, no file over 1000 lines; the Reflex prod build works.
 
 ## Per-phase definition of done
 
