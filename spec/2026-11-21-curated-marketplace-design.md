@@ -368,6 +368,11 @@ source add ─► cache (catalog + part index) ─► browse
 - Each writing command makes **one commit** (`skill-dojo: <action> <item>`, with
   `--no-verify`, because local hooks must never run on upstream content). Hand edits are
   committed by `finish`, or by the admin.
+- A command commits only the files it changed; the admin's other uncommitted edits
+  stay out of it (`finish` commits everything). A command that fails undoes what it
+  wrote, so no half-written change is committed by the next command. Mirror folders
+  and the folder of a `local:` part source must be clean, or the command stops.
+- `work_branch` must differ from the main branch (validated in `config.yaml`).
 - `sync` (CLI and scheduled workflow) writes upstream updates into the same work branch:
   one commit per moved mirror or local plugin with parts. It skips `quarantined` items and
   is idempotent. It also refreshes the cached catalog of every source.
@@ -391,7 +396,8 @@ item stays at its pinned commit until the flag is cleared.
 **Release** (manual). `release` requires that `origin/main` validates and that `build
 --check` is clean there. It tags `marketplace-vYYYY.MM.DD[.N]`, writes notes (added,
 updated with old → new version, removed) and creates a GitHub Release for the tag. It
-refuses when `origin/main` has not changed since the last tag.
+refuses when `origin/main` has not changed since the last tag. If an earlier run pushed
+the tag but could not create the GitHub Release, the next run creates it.
 
 **Migration.** Loading `items.yaml` accepts `kind: bundle` and treats it as `local`, with
 its parts kept. `build` rewrites it as `local`. `approvals.yaml` and the `channels` and
@@ -417,7 +423,8 @@ validate workflow, and on the Changes page.
 `plugin new <name>`, `local add <dir>`, `lock refresh`, `build [--check]`, `validate`,
 `flags [--base]`, `version <item> --patch|--minor|--major|--set X.Y.Z`, `sync [--item]`,
 `status`, `finish [--level item=level] [--no-pr]`, `release`, `revoke <item> [--to TAG]`,
-`clients add|list|remove`, `vendor` (consumer side, replaces `add-skills.sh`), `serve`
+`clients add|list|remove`, `marketplace add|update` (consumer side, replaces
+`add-skills.sh`; decided by the user, was `vendor`), `serve`
 (needs `skill-dojo[web]`).
 
 Parts use `source:plugin/kind/name` with `kind` one of `skill`, `agent`, `mcp_server` or
@@ -452,7 +459,7 @@ built from git).
   `validate-marketplace.yml`.
 - `scripts/add-skills.sh`: vendors the marketplace's skills into a *consumer* project
   repo (git subtree into `.agents/agent-skills`, plus `.agents/skills` and
-  `.claude/skills` symlinks). It becomes `skill-dojo vendor` (my call).
+  `.claude/skills` symlinks). It becomes `skill-dojo marketplace add|update` (named by the user).
 
 ## Calls made (not decided by the user, please check)
 
@@ -507,7 +514,9 @@ built from git).
     symlink view. Default for a new repo: off. The jenreh repo turns them on. The hardcoded
     plugin list and descriptions in `link-plugins.sh` become data that is read from
     `items.yaml` and the manifests.
-11. **The cache lives in the repo.** `.skill-dojo/cache/` ignores itself through its own
+11. **The cache lives in the repo.** Fetching and indexing hold a cache lock, and an older
+    commit's checkout is pruned only after it was unused for an hour.
+    `.skill-dojo/cache/` ignores itself through its own
     `.gitignore`. A cached checkout is reused only when its `HEAD` is exactly the pinned
     commit. The cache is a speed-up, never a source of truth: the ref is resolved against
     the remote every time something is vendored.
