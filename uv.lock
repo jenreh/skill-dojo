@@ -1170,7 +1170,7 @@ wheels = [
 
 [[package]]
 name = "skill-dojo"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "components/skill-dojo-cli" }
 dependencies = [
     { name = "skill-dojo-core" },
@@ -1192,7 +1192,7 @@ provides-extras = ["web"]
 
 [[package]]
 name = "skill-dojo-core"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "components/skill-dojo-core" }
 dependencies = [
     { name = "httpx" },
@@ -1209,7 +1209,7 @@ requires-dist = [
 
 [[package]]
 name = "skill-dojo-web"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "components/skill-dojo-web" }
 dependencies = [
     { name = "appkit-mantine" },
@@ -1226,7 +1226,7 @@ requires-dist = [
 
 [[package]]
 name = "skill-dojo-workspace"
-version = "0.0.1"
+version = "0.0.2"
 source = { virtual = "." }
 dependencies = [
     { name = "skill-dojo", extra = ["web"] },

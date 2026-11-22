@@ -1,6 +1,6 @@
 [project]
 name = "skill-dojo-core"
-version = "0.0.1"
+version = "0.0.2"
 description = "Core library of skill-dojo: curated agent plugin marketplaces in a git repo."
 readme = "README.md"
 authors = [{ name = "Jens Rehpöhler" }]

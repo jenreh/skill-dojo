@@ -1,6 +1,6 @@
 [project]
 name = "skill-dojo-workspace"
-version = "0.0.1"
+version = "0.0.2"
 description = "Workspace root of skill-dojo (not published)."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -37,7 +37,7 @@ skill-dojo-web = { workspace = true }
 
 [tool.bumpversion]
 commit = false
-current_version = "0.0.1"
+current_version = "0.0.2"
 tag = false
 allow-dirty = false
 
