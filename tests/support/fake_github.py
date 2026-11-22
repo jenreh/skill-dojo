@@ -81,6 +81,7 @@ class FakeGitHub:
             head=head,
             base=base,
             author=self.user,
+            created_at=f"2026-11-21T09:{number % 60:02d}:00Z",
         )
         self.pulls.append(pr)
         self.calls.append(("open_pull_request", (head, base)))

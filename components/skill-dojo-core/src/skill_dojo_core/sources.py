@@ -33,6 +33,9 @@ class UpstreamPlugin(Result):
     version: str | None = None
     description: str | None = None
     unsupported: str | None = None
+    contents: str | None = None
+    license: str | None = None
+    allowed: bool = True
 
 
 def repo_url(repository: str) -> str:
@@ -169,8 +172,66 @@ def _git_plugins(source: Source, root: Path) -> list[UpstreamPlugin]:
     return found
 
 
-def list_plugins(source: Source, root: Path) -> list[UpstreamPlugin]:
-    """What ``source`` offers, read from its checkout at ``root``."""
+def describe(plugin: UpstreamPlugin, root: Path) -> UpstreamPlugin:
+    """Add contents and license of a plugin that lives in this checkout."""
+    base = root if plugin.path == "." else root / plugin.path
+    if plugin.unsupported or not base.is_dir() or base.is_symlink():
+        return plugin
+    paths = [
+        p.relative_to(base).as_posix()
+        for p in base.rglob("*")
+        if p.is_file() and not p.is_symlink() and ".git" not in p.parts
+    ]
+    servers = 0
+    for rel in (".mcp.json", "mcp.json"):
+        if (base / rel).is_symlink():
+            continue
+        try:
+            data = json.loads((base / rel).read_text(encoding="utf-8"))
+        except OSError, UnicodeDecodeError, json.JSONDecodeError:
+            continue
+        found = data.get("mcpServers") if isinstance(data, dict) else None
+        servers = len(found) if isinstance(found, dict) else 0
+        break
+    manifest = _manifest(base) or {}
+    license_ = manifest.get("license")
+    return plugin.model_copy(
+        update={
+            "contents": contents_summary(paths, servers),
+            "license": license_ if isinstance(license_, str) else None,
+        }
+    )
+
+
+def contents_summary(paths: list[str], mcp_servers: int = 0) -> str:
+    """``3 skills · 1 MCP · 1 hook`` of a plugin's file list."""
+    skills = {
+        p.split("/")[1]
+        for p in paths
+        if p.startswith("skills/") and p.endswith("/SKILL.md")
+    }
+    agents = [p for p in paths if p.startswith("agents/") and p.endswith(".md")]
+    hooks = 1 if any(PurePosixPath(p).name == "hooks.json" for p in paths) else 0
+    parts = [
+        (len(skills), "skill"),
+        (len(agents), "agent"),
+        (mcp_servers, "MCP"),
+        (hooks, "hook"),
+    ]
+    text = [
+        f"{n} {word}{'s' if n > 1 and word != 'MCP' else ''}" for n, word in parts if n
+    ]
+    return " · ".join(text) or "no components"
+
+
+def list_plugins(
+    source: Source, root: Path, *, only_allowed: bool = True
+) -> list[UpstreamPlugin]:
+    """What ``source`` offers, read from its checkout at ``root``.
+
+    With ``only_allowed=False`` plugins outside the allowlist are listed too,
+    marked ``allowed=False``.
+    """
     if source.type is SourceType.GIT:
         plugins = _git_plugins(source, root)
     elif source.type in DEFAULT_PATHS:
@@ -192,5 +253,9 @@ def list_plugins(source: Source, root: Path) -> list[UpstreamPlugin]:
     else:
         raise InvalidInputError(f"source type '{source.type.value}' has no catalog yet")
     if source.allowlist:
-        plugins = [p for p in plugins if p.name in source.allowlist]
+        plugins = [
+            p.model_copy(update={"allowed": p.name in source.allowlist})
+            for p in plugins
+            if not only_allowed or p.name in source.allowlist
+        ]
     return sorted(plugins, key=lambda p: p.name)

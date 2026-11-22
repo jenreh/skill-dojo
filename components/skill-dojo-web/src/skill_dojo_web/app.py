@@ -1,26 +1,30 @@
-"""The skill-dojo web UI app."""
+"""The skill-dojo web UI app: seven pages over the same core as the CLI."""
 
-import appkit_mantine as mn
 import reflex as rx
 
-from skill_dojo_web.branding import FAVICON
-from skill_dojo_web.components.templates import navbar_template
-from skill_dojo_web.styles import base_style, base_stylesheets
+from skill_dojo_web.pages.audit import AuditState, audit_page
+from skill_dojo_web.pages.bundles import BundlesState, bundles_page
+from skill_dojo_web.pages.clients import ClientsState, clients_page
+from skill_dojo_web.pages.preview import PreviewState, preview_page
+from skill_dojo_web.pages.releases import ReleasesState, releases_page
+from skill_dojo_web.pages.review import ReviewState, review_page
+from skill_dojo_web.pages.sources import SourcesState, sources_page
 
-
-@rx.page(route="/", title="skill-dojo")
-def index() -> rx.Component:
-    return navbar_template(
-        mn.stack(
-            mn.title("skill-dojo", order=1),
-            mn.text("Curated agent plugin marketplace."),
-            p="2rem",
-        )
-    )
-
+PAGES = [
+    ("/", "Review queue", review_page, ReviewState.load),
+    ("/sources", "Sources and browse", sources_page, SourcesState.load),
+    ("/bundles", "Bundles", bundles_page, BundlesState.load),
+    ("/preview", "Marketplace preview", preview_page, PreviewState.load),
+    ("/releases", "Releases", releases_page, ReleasesState.load),
+    ("/clients", "Clients", clients_page, ClientsState.load),
+    ("/audit", "Audit", audit_page, AuditState.load),
+]
 
 app = rx.App(
-    head_components=[rx.el.link(rel="icon", type="image/svg+xml", href=FAVICON)],
-    stylesheets=base_stylesheets,
-    style=base_style,  # ty: ignore[invalid-argument-type]  # reflex dynamic styling
+    stylesheets=["/css/skill-dojo.css"],
+    head_components=[
+        rx.el.link(rel="icon", type="image/svg+xml", href="/img/logo/shoji_favicon.svg")
+    ],
 )
+for route, title, page, on_load in PAGES:
+    app.add_page(page, route=route, title=f"{title} · skill-dojo", on_load=on_load)

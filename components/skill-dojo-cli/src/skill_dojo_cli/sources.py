@@ -75,4 +75,8 @@ def browse(
         version = f" {plugin.version}" if plugin.version else ""
         where = f" ({plugin.repository})" if plugin.repository != result.source else ""
         note = f"  [cannot mirror: {plugin.unsupported}]" if plugin.unsupported else ""
+        if not plugin.allowed:
+            note += "  [not on the allowlist]"
+        if plugin.name in result.tracked:
+            note += f"  [{result.tracked[plugin.name]}]"
         typer.echo(f"  {plugin.name}{version}  {plugin.path}{where}{note}")

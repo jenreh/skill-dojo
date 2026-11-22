@@ -62,6 +62,10 @@ TOOL_KEYS = ("allowed-tools", "allowedTools", "tools")
 TOOL_DIRS = frozenset({"skills", "commands", "agents"})
 
 
+# A flag row of ``render``'s table: | `kind` | ...
+FLAG_ROW = re.compile(r"^\| `[a-z0-9-]+` \|", re.MULTILINE)
+
+
 class RiskFlag(Result):
     kind: str
     path: str

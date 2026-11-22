@@ -14,8 +14,8 @@ tasks:
 
   run:
     desc: Start the reflex web application
-    cmd: "{{.RUNNER}} reflex run"
+    cmd: "{{.RUNNER}} skill-dojo serve"
 
   run:debug:
     desc: Start the reflex web application with debug logging
-    cmd: "{{.RUNNER}} reflex run --loglevel=debug"
+    cmd: "{{.RUNNER}} skill-dojo -v serve"

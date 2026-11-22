@@ -10,7 +10,6 @@ item whose content matches an approval.
 """
 
 import logging
-import re
 from pathlib import Path
 
 from skill_dojo_core import builder, git
@@ -46,13 +45,13 @@ from skill_dojo_core.registry import (
 )
 from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
+from skill_dojo_core.risk import FLAG_ROW
 from skill_dojo_core.validation import validate_registry
 
 log = logging.getLogger(__name__)
 
 MARKER = "<!-- skill-dojo:promote -->"
 # A row of the risk-flag table in a candidate PR body (risk.render).
-FLAG_ROW = re.compile(r"^\| `[a-z0-9-]+` \|", re.MULTILINE)
 
 
 class PolicyBlock(Result):

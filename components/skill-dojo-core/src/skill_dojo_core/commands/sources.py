@@ -5,10 +5,18 @@ import tempfile
 from pathlib import Path
 
 from skill_dojo_core import git, mcp_registry, sources
+from skill_dojo_core.branches import base_branch, remote_start
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
-from skill_dojo_core.models import Source, SourceType
-from skill_dojo_core.registry import SOURCES, Registry, save_yaml_model
+from skill_dojo_core.models import ItemsFile, LockFile, Source, SourceType
+from skill_dojo_core.registry import (
+    ITEMS,
+    LOCK,
+    SOURCES,
+    Registry,
+    model_at,
+    save_yaml_model,
+)
 from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
 from skill_dojo_core.sources import UpstreamPlugin
@@ -27,6 +35,31 @@ class BrowseResult(Result):
     source: str
     commit: str
     plugins: list[UpstreamPlugin]
+    tracked: dict[str, str] = {}
+
+
+def tracked_plugins(ctx: Context, source_id: str) -> dict[str, str]:
+    """Upstream plugin -> how staging uses it (mirror, bundle part)."""
+    start = remote_start(ctx.repo, base_branch(Registry.load(ctx.repo)))
+    items = model_at(ctx.repo, start, ITEMS, ItemsFile)
+    locks = model_at(ctx.repo, start, LOCK, LockFile).items
+    found: dict[str, str] = {}
+    for item in items.items:
+        if item.source == source_id and item.upstream_plugin:
+            lock = locks.get(item.id)
+            version = (
+                lock.version if lock and lock.version else (item.commit or "")[:12]
+            )
+            state = "quarantined" if item.quarantined else f"pinned {version}"
+            found[item.upstream_plugin] = f"mirror · {state}"
+        parts = [p for p in item.parts if p.source == source_id and p.upstream_plugin]
+        for part in parts:
+            count = sum(1 for p in parts if p.upstream_plugin == part.upstream_plugin)
+            found.setdefault(
+                str(part.upstream_plugin),
+                f"bundle part · {count} {part.kind.replace('_', ' ')}",
+            )
+    return found
 
 
 def _save(reg: Registry) -> None:
@@ -116,14 +149,19 @@ def checkout_source(ctx: Context, source: Source, dest: Path) -> str:
     return commit
 
 
-def browse_servers(source: Source, search: str | None) -> BrowseResult:
+def browse_servers(ctx: Context, source: Source, search: str | None) -> BrowseResult:
     """The servers an MCP Registry offers, at their latest version."""
     offered = [
         mcp_registry.offered(entry, source.repository)
         for entry in mcp_registry.list_servers(source.repository, search)
         if not source.allowlist or entry.name in source.allowlist
     ]
-    return BrowseResult(source=source.id, commit="latest", plugins=offered)
+    return BrowseResult(
+        source=source.id,
+        commit="latest",
+        plugins=offered,
+        tracked=tracked_plugins(ctx, source.id),
+    )
 
 
 def browse(ctx: Context, source_id: str, *, search: str | None = None) -> BrowseResult:
@@ -134,8 +172,29 @@ def browse(ctx: Context, source_id: str, *, search: str | None = None) -> Browse
     reg = Registry.load(ctx.repo)
     source = get_source(reg, source_id)
     if source.type is SourceType.MCP_REGISTRY:
-        return browse_servers(source, search)
+        return browse_servers(ctx, source, search)
     with tempfile.TemporaryDirectory(prefix="skill-dojo-") as tmp:
-        commit = checkout_source(ctx, source, Path(tmp) / "src")
-        plugins = sources.list_plugins(source, Path(tmp) / "src")
-    return BrowseResult(source=source_id, commit=commit, plugins=plugins)
+        root = Path(tmp) / "src"
+        commit = checkout_source(ctx, source, root)
+        plugins = [
+            sources.describe(p, root) if p.repository == source.repository else p
+            for p in sources.list_plugins(source, root, only_allowed=False)
+        ]
+    return BrowseResult(
+        source=source_id,
+        commit=commit,
+        plugins=plugins,
+        tracked=tracked_plugins(ctx, source_id),
+    )
+
+
+def source_allow(ctx: Context, source_id: str, plugin: str) -> SourcesResult:
+    """Add ``plugin`` to the allowlist of a source that has one."""
+    with repo_lock(ctx.repo):
+        reg = Registry.load(ctx.repo)
+        source = get_source(reg, source_id)
+        if source.allowlist and plugin not in source.allowlist:
+            source.allowlist.append(plugin)
+            _save(reg)
+    ctx.report(f"Allowed '{plugin}' from '{source_id}'")
+    return SourcesResult(sources=reg.sources.sources)

@@ -1,8 +1,12 @@
 """Local web UI of skill-dojo."""
 
-from skill_dojo_core import not_implemented
+from pathlib import Path
+
+from skill_dojo_web.server import DEFAULT_PORT
 
 
-def serve() -> None:
-    """Start the web UI on 127.0.0.1."""
-    not_implemented("serve")
+def serve(repo: Path, port: int = DEFAULT_PORT) -> int:
+    """Build and start the web UI for ``repo`` on 127.0.0.1."""
+    from skill_dojo_web import server  # noqa: PLC0415 (keeps import light)
+
+    return server.serve(repo, port)
