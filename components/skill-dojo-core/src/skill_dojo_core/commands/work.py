@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 
 MARKER = "<!-- skill-dojo:work-branch -->"
 TITLE = "skill-dojo: registry changes"
+# GitHub refuses PR bodies over 65536 characters; the table needs room too.
+MAX_FLAGS = 40_000
 
 
 class WorkStatus(Result):
@@ -150,7 +152,11 @@ def pr_body(pending: list[PendingVersion], flag_text: str) -> str:
         ]
     else:
         lines.append("- none (registry files only)")
-    lines += ["", flag_text.strip(), "", MARKER]
+    flag_text = flag_text.strip()
+    if len(flag_text) > MAX_FLAGS:
+        cut = flag_text[:MAX_FLAGS].rsplit("\n", 1)[0]
+        flag_text = f"{cut}\n\n(cut; run `skill-dojo flags` for all risk flags)"
+    lines += ["", flag_text, "", MARKER]
     return "\n".join(lines)
 
 
@@ -191,7 +197,7 @@ def finish(
         work, main = work_branch(reg), main_branch(reg)
         _set_levels(reg, chosen)
         builder.apply_build(Registry.load(ctx.repo))
-        commit = commit_work(ctx, "finish")
+        commit = commit_work(ctx, "finish", everything=True)
         main_ref = f"refs/remotes/origin/{main}"
         if git.run(ctx.repo, "rev-parse", "HEAD^{tree}") == git.run(
             ctx.repo, "rev-parse", f"{main_ref}^{{tree}}"
@@ -200,7 +206,7 @@ def finish(
         if push_work(ctx, work):
             # origin had commits (sync) that were merged: build the union again.
             builder.apply_build(Registry.load(ctx.repo))
-            commit = commit_work(ctx, "finish") or commit
+            commit = commit_work(ctx, "finish", everything=True) or commit
             push_work(ctx, work)
         pending = pending_versions(ctx)
         flag_text = flags(ctx, base=main_ref).markdown

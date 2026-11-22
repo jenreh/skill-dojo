@@ -154,6 +154,9 @@ def change_parts(ctx: Context, item: Item, change: Change) -> ChangeResult:
     lock = reg.lock.items.get(item.id)
     generated = set(lock.generated) if lock else set()
     before = tree_of(root, reg.config.namespace, generated)
+    for rel in generated:
+        # Build made them from files the parts may change; it makes them again.
+        (root / rel).unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="skill-dojo-up-") as tmp:
         fetcher = Fetcher(ctx, {s.id: s for s in reg.sources.sources}, Path(tmp))
         picked = _apply(item, PluginTree(root, generated), change, fetcher)

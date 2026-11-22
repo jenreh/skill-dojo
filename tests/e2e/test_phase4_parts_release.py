@@ -7,6 +7,7 @@ import pytest
 from skill_dojo_core import (
     ConflictError,
     Context,
+    ExternalToolError,
     InvalidInputError,
     NotFoundError,
     add_parts,
@@ -87,6 +88,11 @@ def test_parts_from_upstream_agent_mcp_and_local(
             )
         },
     )
+    with pytest.raises(ConflictError, match="uncommitted"):
+        add_parts(admin, "kit", ["local:own/skill/note"], create=True)
+    assert not (admin.repo / "plugins/kit").exists()  # rolled back
+    git(admin.repo, "add", "-A")
+    git(admin.repo, "commit", "-q", "-m", "own skill")
     result = add_parts(
         admin,
         "kit",
@@ -104,8 +110,11 @@ def test_parts_from_upstream_agent_mcp_and_local(
     assert parts["docs"].path == "plugins/box/.mcp.json"
     assert validate(admin).ok
 
+    assert (root / "mcp.json").exists()  # generated counterpart
     remove_parts(admin, "kit", ["mcp_server/docs", "agent/rev"])
     assert not (root / ".mcp.json").exists()
+    assert not (root / "mcp.json").exists()
+    assert "mcp.json" not in lock(admin).items["kit"].files
     assert not (root / "licenses/mx-box/LICENSE").exists()
     assert [p.name for p in lock(admin).items["kit"].parts] == ["note"]
     with pytest.raises(NotFoundError, match="no MCP server"):
@@ -244,3 +253,51 @@ def test_lock_and_part_paths_are_validated() -> None:
     with pytest.raises(ValueError):
         Part(kind="skill", name="../s")
     assert Part(kind="hook", name="PreToolUse").kind == "hook"
+
+
+def test_failed_command_rolls_back_and_commits_skip_own_edits(
+    admin: Context, upstreams: tuple[FixtureRepo, ...]
+) -> None:
+    del upstreams
+    plugin_new(admin, "own")
+    notes = admin.repo / "NOTES.md"
+    notes.write_text("my draft\n")
+    with pytest.raises(NotFoundError):
+        add_parts(
+            admin, "kit", ["ap:hello/skill/greet", "ap:hello/skill/nope"], create=True
+        )
+    assert not (admin.repo / "plugins/kit").exists()
+    assert "kit" not in (admin.repo / "registry/items.yaml").read_text()
+    assert notes.read_text() == "my draft\n"
+    mirror(admin, "ap", "hello")
+    assert "NOTES.md" not in git(admin.repo, "show", "--name-only", "--format=", "HEAD")
+    assert git(admin.repo, "status", "--porcelain") == "?? NOTES.md"
+    finish(admin)
+    assert "NOTES.md" in git(admin.repo, "show", "--name-only", "--format=", "HEAD")
+
+
+def test_release_publishes_a_missing_github_release(
+    admin: Context, upstreams: tuple[FixtureRepo, ...], fake_github: FakeGitHub
+) -> None:
+    del upstreams
+    mirror(admin, "ap", "hello")
+    fake_github.release_fails = True
+    with pytest.raises(ExternalToolError):
+        ship(admin, fake_github)
+    fake_github.release_fails = False
+    again = release(admin)
+    assert again.status == "published"
+    assert fake_github.releases[0][0] == again.tag
+    assert "Added:" in fake_github.releases[0][2]
+    assert release(admin).status == "up-to-date"
+
+
+def test_work_branch_must_differ_from_main(admin: Context) -> None:
+    config = admin.repo / "registry/config.yaml"
+    config.write_text(
+        config.read_text().replace(
+            "work_branch: skill-dojo/changes", "work_branch: main"
+        )
+    )
+    with pytest.raises(InvalidInputError, match="must not be the main branch"):
+        plugin_new(admin, "x")

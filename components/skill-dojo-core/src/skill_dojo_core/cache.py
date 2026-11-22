@@ -18,8 +18,10 @@ the pinned commit and its tree is unchanged.
 import hashlib
 import json
 import logging
+import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -27,6 +29,7 @@ from pydantic import ValidationError
 from skill_dojo_core import git
 from skill_dojo_core.errors import ExternalToolError
 from skill_dojo_core.models import COMMIT_RE, ITEM_ID_RE, Source
+from skill_dojo_core.repo_lock import file_lock
 from skill_dojo_core.results import Result
 from skill_dojo_core.sources import UpstreamPlugin
 
@@ -38,6 +41,9 @@ INDEX = "index.json"
 CURRENT = "current.json"
 IGNORE_ALL = "*\n"
 LATEST = "latest"  # the MCP Registry has no commits
+LOCK = ".lock"
+# A checkout not used for this long may be pruned; a younger one may be in use.
+PRUNE_AFTER = 3600.0
 
 
 class PartRef(Result):
@@ -98,16 +104,18 @@ def checkout(
 ) -> Path:
     """A checkout of ``url`` at ``commit`` in ``folder``, fetched once."""
     _check_commit(commit)
-    if _usable(folder, commit):
-        log.debug("Cache hit %s", folder.relative_to(repo))
-        return folder
-    folder.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=folder.parent, prefix=".fetch-") as tmp:
-        fresh = Path(tmp) / "co"
-        git.fetch_commit(url, commit, fresh, credentials_from=credentials_from)
-        if folder.exists():
-            shutil.rmtree(folder)
-        fresh.rename(folder)
+    with file_lock(root(repo) / LOCK, timeout=600.0):
+        if _usable(folder, commit):
+            log.debug("Cache hit %s", folder.relative_to(repo))
+            os.utime(folder)
+            return folder
+        folder.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=folder.parent, prefix=".fetch-") as tmp:
+            fresh = Path(tmp) / "co"
+            git.fetch_commit(url, commit, fresh, credentials_from=credentials_from)
+            if folder.exists():
+                shutil.rmtree(folder)
+            fresh.rename(folder)
     log.debug("Cached %s", folder.relative_to(repo))
     return folder
 
@@ -132,14 +140,27 @@ def repo_checkout(repo: Path, url: str, commit: str) -> Path:
 
 def write_index(repo: Path, index: SourceIndex) -> None:
     base = source_dir(repo, index.source)
-    folder = base / index.commit
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / INDEX).write_text(index.model_dump_json(indent=2), encoding="utf-8")
-    current = {"commit": index.commit, "settings": index.settings}
-    (base / CURRENT).write_text(json.dumps(current), encoding="utf-8")
+    with file_lock(root(repo) / LOCK, timeout=600.0):
+        folder = base / index.commit
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / INDEX).write_text(index.model_dump_json(indent=2), "utf-8")
+        current = {"commit": index.commit, "settings": index.settings}
+        (base / CURRENT).write_text(json.dumps(current), encoding="utf-8")
+        _prune(base, keep=index.commit)
+
+
+def _prune(base: Path, keep: str) -> None:
+    """Drop older commits of a source that nothing used for a while (a command
+    may still be reading a younger one); they are fetched again when needed."""
+    limit = time.time() - PRUNE_AFTER
     for old in base.iterdir():
-        # Keep only the current commit; older checkouts are fetched again.
-        if old.is_dir() and not old.is_symlink() and old.name != index.commit:
+        if old.name == keep or not old.is_dir() or old.is_symlink():
+            continue
+        used = max(
+            (p.stat().st_mtime for p in (old, old / "checkout") if p.exists()),
+            default=0.0,
+        )
+        if used < limit:
             shutil.rmtree(old)
 
 

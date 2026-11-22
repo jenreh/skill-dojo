@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from skill_dojo_core import builder, git, hashing, jsontext
+from skill_dojo_core.branches import check_clean_folder
 from skill_dojo_core.cache import PartRef
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
@@ -441,6 +442,8 @@ class Fetcher:
         if item is None or item.kind is not ItemKind.LOCAL:
             raise NotFoundError(f"'{plugin}' is not a local plugin")
         root = repo / builder.plugin_dir(plugin)
+        # The part is pinned to HEAD, so its files must be the ones at HEAD.
+        check_clean_folder(repo, builder.plugin_dir(plugin))
         lock = reg.lock.items.get(plugin)
         skip = set(lock.generated) if lock else set()
         files = {r: root / r for r in hashing.list_files(root) if r not in skip}

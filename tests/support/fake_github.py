@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from skill_dojo_core.errors import ExternalToolError
 from skill_dojo_core.github import PullRequest
 
 MERGED_AT = "2026-11-21T11:00:00Z"
@@ -27,6 +28,7 @@ class FakeGitHub:
     calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     pulls: list[PullRequest] = field(default_factory=list)
     releases: list[tuple[str, str, str]] = field(default_factory=list)
+    release_fails: bool = False
 
     def current_user(self) -> str:
         self.calls.append(("current_user", ()))
@@ -156,5 +158,12 @@ class FakeGitHub:
 
     def create_release(self, tag: str, title: str, notes: str) -> str:
         self.calls.append(("create_release", (tag,)))
+        if self.release_fails:
+            raise ExternalToolError("gh release create failed: offline")
         self.releases.append((tag, title, notes))
         return f"https://github.invalid/acme/marketplace/releases/tag/{tag}"
+
+    def release_url(self, tag: str) -> str | None:
+        if any(r[0] == tag for r in self.releases):
+            return f"https://github.invalid/acme/marketplace/releases/tag/{tag}"
+        return None

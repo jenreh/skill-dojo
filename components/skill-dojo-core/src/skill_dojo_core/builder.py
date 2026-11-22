@@ -510,7 +510,9 @@ def refresh_local(reg: Registry, overlay: Overlay, item: Item) -> None:
     reg.lock.items[item.id] = ItemLock(
         kind=ItemKind.LOCAL,
         version=old.version if old else None,
-        upstream=old.upstream.model_copy(update={"commit": _head_or_zero(reg.repo)})
+        upstream=old.upstream.model_copy(
+            update={"commit": _head_or_zero(reg.repo), "ref": None}
+        )
         if old
         else Upstream(
             repository=reg.config.repository or reg.config.name,

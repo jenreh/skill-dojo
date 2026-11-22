@@ -6,11 +6,13 @@ Every writing command first puts the checkout on the work branch
 force-pushes and never rewrites history the admin pushed.
 """
 
+import hashlib
 import logging
 import re
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from skill_dojo_core import git, merging
@@ -54,8 +56,26 @@ def current_branch(repo: Path) -> str | None:
 
 def dirty_files(repo: Path) -> list[str]:
     """Changed and untracked paths (``git status``; ignored files never count)."""
-    out = git.run(repo, "status", "--porcelain", "--untracked-files=all")
-    return [line[3:] for line in out.splitlines() if line.strip()]
+    out = git.raw(repo, "status", "--porcelain", "-z", "--untracked-files=all")
+    entries = out.split("\0")
+    found, skip = [], False
+    for entry in entries:
+        if skip or len(entry) < 4:  # noqa: PLR2004 ("XY " + a path)
+            skip = False
+            continue
+        found.append(entry[3:])
+        skip = entry[0] in "RC"  # a rename's old path follows
+    return found
+
+
+def check_clean_folder(repo: Path, folder: str) -> None:
+    """Refuse to replace a folder that holds uncommitted edits."""
+    dirty = [p for p in dirty_files(repo) if p.startswith(folder.rstrip("/") + "/")]
+    if dirty:
+        raise ConflictError(
+            f"{folder} has uncommitted changes ({', '.join(dirty[:MAX_DIRTY])}); "
+            "commit or discard them first"
+        )
 
 
 def has_origin(repo: Path) -> bool:
@@ -183,13 +203,42 @@ def ensure_work_branch(ctx: Context) -> WorkBranch:
     return WorkBranch(name=work, status=status)
 
 
-def commit_work(ctx: Context, message: str) -> str | None:
-    """Commit everything on the work branch; returns the commit or None.
+# What the working tree held when a writing command started (``editing``).
+_BEFORE: ContextVar[dict[str, str] | None] = ContextVar("before", default=None)
 
+
+def _state(repo: Path, rel: str) -> str:
+    path = repo / rel
+    if path.is_symlink():
+        return "link:" + str(path.readlink())
+    if path.is_file():
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    return "missing"
+
+
+def snapshot(repo: Path) -> dict[str, str]:
+    """Every changed or untracked path with the content it has now."""
+    return {rel: _state(repo, rel) for rel in dirty_files(repo)}
+
+
+def _touched(repo: Path, before: dict[str, str]) -> list[str]:
+    """Paths a command changed: newly dirty, or dirty before with new content."""
+    return [rel for rel in dirty_files(repo) if before.get(rel) != _state(repo, rel)]
+
+
+def commit_work(ctx: Context, message: str, *, everything: bool = False) -> str | None:
+    """Commit what the command changed on the work branch; returns the commit.
+
+    The admin's own uncommitted edits stay out unless the command touched the
+    same file (``finish`` passes ``everything`` to commit them too).
     ``--no-verify``: local hooks never run on untrusted upstream content.
     """
-    git.run(ctx.repo, "add", "-A")
-    if not git.run(ctx.repo, "status", "--porcelain"):
+    before = None if everything else _BEFORE.get()
+    paths = dirty_files(ctx.repo) if before is None else _touched(ctx.repo, before)
+    if not paths:
+        return None
+    git.run(ctx.repo, "add", "-A", "--", *paths)
+    if not git.run(ctx.repo, "diff", "--cached", "--name-only"):
         return None
     git.run(ctx.repo, "commit", "-q", "--no-verify", "-m", f"{COMMIT_PREFIX}{message}")
     commit = git.head(ctx.repo)
@@ -243,4 +292,37 @@ def editing(ctx: Context) -> Generator[WorkBranch]:
     Code inside must not take ``repo_lock`` again (it is not re-entrant).
     """
     with repo_lock(ctx.repo):
-        yield ensure_work_branch(ctx)
+        branch = ensure_work_branch(ctx)
+        before = snapshot(ctx.repo)
+        token = _BEFORE.set(before)
+        try:
+            yield branch
+        except BaseException:
+            _roll_back(ctx.repo, before)
+            raise
+        finally:
+            _BEFORE.reset(token)
+
+
+def _roll_back(repo: Path, before: dict[str, str]) -> None:
+    """Undo what a failed command wrote: newly changed paths go back to HEAD.
+
+    Paths that were dirty before cannot be restored and are only reported.
+    """
+    git.run(repo, "reset", "-q", check=False)
+    for rel in _touched(repo, before):
+        if rel in before:
+            log.warning("Not undoing %s: it had your own changes", rel)
+        elif git.succeeds(repo, "cat-file", "-e", f"HEAD:{rel}"):
+            git.run(repo, "checkout", "-q", "HEAD", "--", rel)
+        else:
+            (repo / rel).unlink(missing_ok=True)
+            _drop_empty_parents(repo, (repo / rel).parent)
+    log.info("Rolled back the changes of a failed command")
+
+
+def _drop_empty_parents(repo: Path, folder: Path) -> None:
+    """Remove folders a failed command created and left empty."""
+    while folder != repo and folder.is_dir() and not any(folder.iterdir()):
+        folder.rmdir()
+        folder = folder.parent

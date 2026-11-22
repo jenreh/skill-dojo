@@ -37,7 +37,7 @@ TAG_PREFIX = "marketplace-v"
 
 
 class ReleaseResult(Result):
-    status: str  # created | up-to-date
+    status: str  # created | published (release of an existing tag) | up-to-date
     tag: str
     commit: str
     previous: str | None = None
@@ -136,9 +136,7 @@ def release(ctx: Context, *, notes: str | None = None) -> ReleaseResult:
     commit = git.run(ctx.repo, "rev-parse", f"{start}^{{commit}}")
     previous = previous_tag(ctx.repo, commit)
     if previous and git.run(ctx.repo, "rev-parse", f"{previous}^{{commit}}") == commit:
-        return ReleaseResult(
-            status="up-to-date", tag=previous, commit=commit, previous=previous
-        )
+        return _finish_release(ctx, previous, commit)
     with view(ctx.repo, start) as wt:
         check_valid(wt, f"origin/{main}")
     with repo_lock(ctx.repo):
@@ -161,6 +159,25 @@ def release(ctx: Context, *, notes: str | None = None) -> ReleaseResult:
         previous=previous,
         notes=notes,
         url=url,
+    )
+
+
+def _finish_release(ctx: Context, tag: str, commit: str) -> ReleaseResult:
+    """Main is already tagged: create its GitHub Release if an earlier run
+    pushed the tag but failed to publish the release."""
+    url = ctx.github.release_url(tag)
+    if url is not None:
+        return ReleaseResult(
+            status="up-to-date", tag=tag, commit=commit, previous=tag, url=url
+        )
+    notes = git.run(
+        ctx.repo, "for-each-ref", "--format=%(contents)", f"refs/tags/{tag}"
+    )
+    url = ctx.github.create_release(tag, f"Marketplace {tag}", notes + "\n")
+    ctx.report(f"Published the missing GitHub Release of {tag}")
+    log.info("Published the missing GitHub Release of %s", tag)
+    return ReleaseResult(
+        status="published", tag=tag, commit=commit, notes=notes + "\n", url=url
     )
 
 

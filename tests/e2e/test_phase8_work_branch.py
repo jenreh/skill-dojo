@@ -6,6 +6,7 @@ plugin -> plugin new + hand-added skill + build -> finish (one PR, versions)
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -230,7 +231,12 @@ def test_cache_is_reused_and_refreshed(
     assert first.commit == ap.head
     ap.commit({"plugins/hello/skills/wave/SKILL.md": skill_md("wave", "Waves.")})
     assert browse(admin, "ap").commit == first.commit  # from the cache
+    old = admin.repo / ".skill-dojo/cache/sources/ap" / first.commit
     fresh = browse(admin, "ap", refresh=True)
+    assert old.is_dir()  # just used: kept, a command may still read it
+    os.utime(old, (0, 0))
+    os.utime(old / "checkout", (0, 0))
+    browse(admin, "ap", refresh=True)
     assert (fresh.cached, fresh.commit) == (False, ap.head)
     assert {p.name for p in fresh.parts["hello"]} == {"greet", "wave"}
     folders = list((admin.repo / ".skill-dojo/cache/sources/ap").iterdir())

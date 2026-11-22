@@ -71,6 +71,10 @@ class GitHub(Protocol):
         """A GitHub Release for the pushed ``tag``; returns its URL."""
         ...
 
+    def release_url(self, tag: str) -> str | None:
+        """The URL of the GitHub Release of ``tag``, or None when there is none."""
+        ...
+
 
 def _login(value: Any) -> str | None:
     return value.get("login") if isinstance(value, dict) else None
@@ -219,3 +223,20 @@ class GhCli:
             f"--notes={notes}",
         )
         return out.strip().splitlines()[-1] if out.strip() else ""
+
+    def release_url(self, tag: str) -> str | None:
+        exe = shutil.which(self.executable)
+        if exe is None:
+            raise ExternalToolError(f"{self.executable} is not installed")
+        proc = subprocess.run(  # noqa: S603
+            [exe, "release", "view", tag, "--json", "url"],
+            cwd=self.cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            if "not found" in (proc.stderr + proc.stdout).lower():
+                return None
+            raise ExternalToolError(f"gh release view failed: {proc.stderr.strip()}")
+        return json.loads(proc.stdout or "{}").get("url")

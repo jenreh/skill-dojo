@@ -9,7 +9,12 @@ import tempfile
 from pathlib import Path
 
 from skill_dojo_core import builder, hashing, mcp_registry, risk
-from skill_dojo_core.branches import commit_work, editing, short_pin
+from skill_dojo_core.branches import (
+    check_clean_folder,
+    commit_work,
+    editing,
+    short_pin,
+)
 from skill_dojo_core.commands.sources import get_source
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, NotFoundError
@@ -134,6 +139,7 @@ def vendor_mirror(
         check_representable(item_id, files)
         ns = reg.config.namespace
         root = ctx.repo / builder.plugin_dir(item_id)
+        check_clean_folder(ctx.repo, builder.plugin_dir(item_id))
         skip = set(old.generated) if old else set()
         before = tree_of(root, ns, skip) if root.is_dir() and old else {}
         vendor_into(root, files)

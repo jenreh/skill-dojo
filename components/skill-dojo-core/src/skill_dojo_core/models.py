@@ -196,6 +196,12 @@ class RegistryConfig(YamlModel):
     default_policy: Policy = Field(default_factory=Policy)
     categories: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _own_work_branch(self) -> RegistryConfig:
+        if self.work_branch == self.main_branch:
+            raise ValueError("work_branch must not be the main branch")
+        return self
+
 
 # --- registry/sources.yaml --------------------------------------------------
 

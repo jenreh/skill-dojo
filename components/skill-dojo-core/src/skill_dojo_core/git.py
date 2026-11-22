@@ -35,13 +35,20 @@ def _exec(cwd: Path, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def run(cwd: Path, *args: str, check: bool = True) -> str:
+def raw(cwd: Path, *args: str) -> str:
+    """The unstripped output (``git status -z`` starts with a space)."""
     proc = _exec(cwd, args)
-    if check and proc.returncode != 0:
+    if proc.returncode != 0:
         raise ExternalToolError(
             f"git {args[0]} failed: {proc.stderr.strip() or proc.stdout.strip()}"
         )
-    return proc.stdout.strip()
+    return proc.stdout
+
+
+def run(cwd: Path, *args: str, check: bool = True) -> str:
+    if check:
+        return raw(cwd, *args).strip()
+    return _exec(cwd, args).stdout.strip()
 
 
 def head(cwd: Path) -> str:
