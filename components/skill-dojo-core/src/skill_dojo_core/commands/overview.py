@@ -11,15 +11,24 @@ import logging
 import tempfile
 from pathlib import Path, PurePosixPath
 
+from pydantic import Field
+
 from skill_dojo_core import builder, catalogs, git, risk
 from skill_dojo_core.branches import (
+    CANDIDATE,
+    QUARANTINE,
     base_branch,
     candidate_item,
     main_branch,
     remote_start,
     view,
 )
-from skill_dojo_core.commands.bundles import Fetcher, plugin_servers
+from skill_dojo_core.commands.bundles import (
+    FIRST_VERSION,
+    Fetcher,
+    bump_patch,
+    plugin_servers,
+)
 from skill_dojo_core.commands.candidates import tree_at
 from skill_dojo_core.commands.promote import check_policy, collect_approvals
 from skill_dojo_core.commands.release import (
@@ -57,19 +66,10 @@ from skill_dojo_core.validation.report import Finding
 
 log = logging.getLogger(__name__)
 
-PROMOTE, REVOKE, QUARANTINE, CANDIDATE = (
-    "promote/",
-    "revoke/",
-    "quarantine/",
-    "candidate/",
-)
+PROMOTE, REVOKE = "promote/", "revoke/"
 
 
 # --- shared --------------------------------------------------------------------------
-
-
-def _remote(repo: Path, branch: str) -> str:
-    return git.fetch_branch(repo, branch)
 
 
 def _short(sha: str | None) -> str:
@@ -115,7 +115,10 @@ def _item_at(repo: Path, ref: str, item_id: str) -> tuple[Item | None, ItemLock 
 def review_detail(ctx: Context, number: int) -> ReviewDetail:
     """A candidate PR as the review page shows it: versions, flags, diff, policy."""
     pr = tool_pull_request(ctx, number)
-    base, head = _remote(ctx.repo, pr.base), _remote(ctx.repo, pr.head)
+    base, head = (
+        git.fetch_branch(ctx.repo, pr.base),
+        git.fetch_branch(ctx.repo, pr.head),
+    )
     item_id = candidate_item(pr.head) or ""
     reg = Registry.load(ctx.repo)
     ns = reg.config.namespace
@@ -244,7 +247,7 @@ def release_overview(ctx: Context) -> ReleaseOverview:
     """Staging against main: what a promote would bring, checks and tags."""
     admin = Registry.load(ctx.repo)
     staging, main = base_branch(admin), main_branch(admin)
-    s_ref, m_ref = _remote(ctx.repo, staging), _remote(ctx.repo, main)
+    s_ref, m_ref = git.fetch_branch(ctx.repo, staging), git.fetch_branch(ctx.repo, main)
     git.run(ctx.repo, "fetch", "-q", "--tags", "--force", "origin")
     staged = model_at(ctx.repo, s_ref, LOCK, LockFile)
     main_lock = model_at(ctx.repo, m_ref, LOCK, LockFile)
@@ -272,12 +275,12 @@ def release_overview(ctx: Context) -> ReleaseOverview:
                 reviewers=approval.reviewers if approval else [],
             )
         )
-    view = Registry.load(ctx.repo)
-    view.items, view.lock = staged_items, staged
+    staged_reg = Registry.load(ctx.repo)
+    staged_reg.items, staged_reg.lock = staged_items, staged
     on_main = model_at(ctx.repo, m_ref, APPROVALS, ApprovalsFile).approvals
-    view.approvals = ApprovalsFile(approvals=[*on_main, *collected])
+    staged_reg.approvals = ApprovalsFile(approvals=[*on_main, *collected])
     blocks = [
-        f"{b.item}: {b.reason}" for b in check_policy(view, main_lock, main_items)
+        f"{b.item}: {b.reason}" for b in check_policy(staged_reg, main_lock, main_items)
     ]
     found = tags(ctx.repo, admin.clients.clients)
     latest = found[0] if found else None
@@ -338,7 +341,7 @@ def _changed_paths(repo: Path, base: str, pending: list[str]) -> set[str]:
 def marketplace_preview(ctx: Context) -> PreviewResult:
     """What ``build`` would commit, against staging: tree, catalogs, checks."""
     reg = Registry.load(ctx.repo)
-    base = _remote(ctx.repo, base_branch(reg))
+    base = git.fetch_branch(ctx.repo, base_branch(reg))
     overlay = builder.plan(reg)
     pending = overlay.changes()
     changed = _changed_paths(ctx.repo, base, pending)
@@ -503,6 +506,10 @@ def audit_log(ctx: Context) -> AuditResult:
 # --- revoke preview ---------------------------------------------------------------------
 
 
+class RevokePreview(Result):
+    targets: list[RevokeTarget] = []
+
+
 class RevokeTarget(Result):
     item: str
     version: str | None = None
@@ -511,11 +518,11 @@ class RevokeTarget(Result):
     unknown: list[Client] = []
 
 
-def revoke_preview(ctx: Context) -> list[RevokeTarget]:
+def revoke_preview(ctx: Context) -> RevokePreview:
     """Every item on main with the clients a revoke would warn and the release a
     rollback would restore."""
     admin = Registry.load(ctx.repo)
-    m_ref = _remote(ctx.repo, main_branch(admin))
+    m_ref = git.fetch_branch(ctx.repo, main_branch(admin))
     git.run(ctx.repo, "fetch", "-q", "--tags", "--force", "origin")
     lock = model_at(ctx.repo, m_ref, LOCK, LockFile)
     found = []
@@ -537,7 +544,7 @@ def revoke_preview(ctx: Context) -> list[RevokeTarget]:
                 unknown=unknown,
             )
         )
-    return found
+    return RevokePreview(targets=found)
 
 
 # --- bundles -------------------------------------------------------------------------------
@@ -552,17 +559,33 @@ class PartInfo(Result):
     commit: str | None = None
     license: str | None = None
 
+    @property
+    def spec(self) -> str:
+        """``source:plugin/kind/name``, as bundle commands take it."""
+        return f"{self.source}:{self.plugin}/{self.kind}/{self.name}"
+
 
 class BundleInfo(Result):
     id: str
     version: str | None = None
+    next_version: str = FIRST_VERSION
     description: str = ""
     category: str | None = None
     parts: list[PartInfo] = []
 
 
-def bundles_overview(ctx: Context) -> list[BundleInfo]:
-    """The bundles on staging with every part's pin and license."""
+class BundlesOverview(Result):
+    bundles: list[BundleInfo] = []
+    local: list[str] = Field(default_factory=list, description="Local plugins")
+
+
+class PluginParts(Result):
+    parts: list[PartInfo] = []
+
+
+def bundles_overview(ctx: Context) -> BundlesOverview:
+    """The bundles on staging with every part's pin and license, and the
+    local plugins that can give parts."""
     start = remote_start(ctx.repo, base_branch(Registry.load(ctx.repo)))
     items = model_at(ctx.repo, start, ITEMS, ItemsFile)
     locks = model_at(ctx.repo, start, LOCK, LockFile).items
@@ -590,10 +613,12 @@ def bundles_overview(ctx: Context) -> list[BundleInfo]:
                     license=pinned.upstream.license if pinned else None,
                 )
             )
+        version = data.get("version") if isinstance(data, dict) else None
         found.append(
             BundleInfo(
                 id=item.id,
-                version=data.get("version") if isinstance(data, dict) else None,
+                version=version,
+                next_version=bump_patch(version),
                 description=str(data.get("description") or "")
                 if isinstance(data, dict)
                 else "",
@@ -601,10 +626,11 @@ def bundles_overview(ctx: Context) -> list[BundleInfo]:
                 parts=parts,
             )
         )
-    return found
+    local = [i.id for i in items.items if i.kind is ItemKind.LOCAL]
+    return BundlesOverview(bundles=found, local=local)
 
 
-def plugin_parts(ctx: Context, source_id: str, plugin: str) -> list[PartInfo]:
+def plugin_parts(ctx: Context, source_id: str, plugin: str) -> PluginParts:
     """The skills, agents and MCP servers one plugin offers as bundle parts."""
     reg = Registry.load(ctx.repo)
     start = remote_start(ctx.repo, base_branch(reg))
@@ -635,14 +661,19 @@ def plugin_parts(ctx: Context, source_id: str, plugin: str) -> list[PartInfo]:
         "commit": upstream.commit,
         "license": upstream.license,
     }
-    return [
-        *(PartInfo(kind="skill", name=n, path=f"skills/{n}", **common) for n in skills),
-        *(
-            PartInfo(kind="agent", name=n, path=f"agents/{n}.md", **common)
-            for n in agents
-        ),
-        *(
-            PartInfo(kind="mcp_server", name=n, path="mcp", **common)
-            for n in sorted(servers)
-        ),
-    ]
+    return PluginParts(
+        parts=[
+            *(
+                PartInfo(kind="skill", name=n, path=f"skills/{n}", **common)
+                for n in skills
+            ),
+            *(
+                PartInfo(kind="agent", name=n, path=f"agents/{n}.md", **common)
+                for n in agents
+            ),
+            *(
+                PartInfo(kind="mcp_server", name=n, path="mcp", **common)
+                for n in sorted(servers)
+            ),
+        ]
+    )

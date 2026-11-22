@@ -151,6 +151,9 @@ EXAMPLES: list[BaseModel] = [
     skill_dojo_core.PromotionItem(item="kit", kind="bundle"),
     skill_dojo_core.TagInfo(tag="marketplace-v2026.11.21.2", commit="c"),
     skill_dojo_core.CatalogPreview(path="q", changes=[], full=[], text=""),
+    skill_dojo_core.RevokePreview(targets=[]),
+    skill_dojo_core.BundlesOverview(local=["tools"]),
+    skill_dojo_core.PluginParts(parts=[]),
 ]
 
 

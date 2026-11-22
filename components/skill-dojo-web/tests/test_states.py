@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from reflex.state import State
 
+import skill_dojo_core as core
 from skill_dojo_core import Context, NotFoundError, mirror
 from skill_dojo_web import backend, server
 from skill_dojo_web.pages.audit import AuditState, day_label
@@ -17,7 +18,7 @@ from skill_dojo_web.pages.bundles import BundlesState
 from skill_dojo_web.pages.clients import ClientsState
 from skill_dojo_web.pages.preview import PreviewState
 from skill_dojo_web.pages.releases import ReleasesState
-from skill_dojo_web.pages.review import ReviewState, flag_tone
+from skill_dojo_web.pages.review import ReviewState
 from skill_dojo_web.pages.sources import SourcesState
 from skill_dojo_web.state import failure
 from tests.e2e.test_phase4_release import number
@@ -106,8 +107,9 @@ def test_releases_clients_preview_audit_bundles(
     call(rel, "load")
     assert [i["item"] for i in rel.items] == ["hello"]
     assert rel.items[0]["change"].startswith("new")
-    call(rel, "promote")
-    assert "Promote PR opened" in rel.notice
+    call(rel, "set_notes", "Release notes by hand.")
+    rel_promote = core.promote(ui)
+    assert rel_promote.status == "opened"
     promote_pr = next(p for p in fake_github.pulls if p.head.startswith("promote/"))
     fake_github.merge(promote_pr.number)
     call(rel, "tag")
@@ -121,6 +123,10 @@ def test_releases_clients_preview_audit_bundles(
     assert [c["name"] for c in clients.clients] == ["web"]
     assert clients.item == "hello"
     assert clients.affected_names == ["web"]
+    call(clients, "edit_client", "web")
+    call(clients, "set_field", "contact", "#web-guild")
+    call(clients, "add_client")
+    assert clients.clients[0]["contact"] == "#web-guild", clients.notice
     call(clients, "remove_client", "web")
     assert clients.clients == []
 
@@ -145,9 +151,9 @@ def test_releases_clients_preview_audit_bundles(
 
 
 def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert flag_tone("mcp-server-added") == "bad"
-    assert flag_tone("hook-added") == "warn"
-    assert flag_tone("description-changed") == "info"
+    assert core.flag_severity("mcp-server-added") == "bad"
+    assert core.flag_severity("hook-added") == "warn"
+    assert core.flag_severity("description-changed") == "info"
     assert failure(NotFoundError("gone")) == "gone"
     assert failure(RuntimeError("boom")).startswith("Unexpected error")
     from datetime import UTC, datetime

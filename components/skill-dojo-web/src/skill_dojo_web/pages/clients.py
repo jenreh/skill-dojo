@@ -44,7 +44,9 @@ class ClientsState(AppState):
         try:
             ctx = self._ctx()
             self.clients = [c.model_dump() for c in core.clients_list(ctx).clients]
-            self.targets = [t.model_dump(mode="json") for t in core.revoke_preview(ctx)]
+            self.targets = [
+                t.model_dump(mode="json") for t in core.revoke_preview(ctx).targets
+            ]
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
             return
@@ -81,6 +83,7 @@ class ClientsState(AppState):
                 self.ref.strip(),
                 contact=self.contact or None,
                 notes=self.notes or None,
+                update=any(c["name"] == self.name.strip() for c in self.clients),
             )
             self._say(f"Client {self.name} uses {self.ref}")
             self.adding, self.name, self.ref, self.contact, self.notes = (
@@ -93,6 +96,14 @@ class ClientsState(AppState):
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
         self.load()
+
+    @rx.event
+    def edit_client(self, name: str) -> None:
+        found = next((c for c in self.clients if c["name"] == name), None)
+        if found:
+            self.adding = True
+            self.name, self.ref = found["name"], found["ref"]
+            self.contact, self.notes = found["contact"] or "", found["notes"] or ""
 
     @rx.event
     def remove_client(self, name: str) -> None:
@@ -125,7 +136,15 @@ S = ClientsState
 def _client_row(c: rx.Var) -> rx.Component:
     hit = S.affected_names.contains(c["name"])
     return rx.el.tr(
-        rx.el.td(c["name"], class_name="td", style={"font_weight": "500"}),
+        rx.el.td(
+            rx.el.button(
+                c["name"],
+                on_click=S.edit_client(c["name"].to(str)),
+                aria_label=f"Edit {c['name']}",
+                style={"font": "inherit", "font_weight": "500", "color": "inherit", "background": "none", "border": "0", "padding": "0", "cursor": "pointer"},
+            ),
+            class_name="td",
+        ),
         rx.el.td(c["notes"], class_name="td"),
         rx.el.td(c["ref"], class_name="td mono"),
         rx.el.td(c["contact"], class_name="td", style={"color": "var(--muted)"}),

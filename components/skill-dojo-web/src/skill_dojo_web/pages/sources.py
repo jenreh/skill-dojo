@@ -285,11 +285,8 @@ def _actions(p: rx.Var) -> rx.Component:
                 class_name="row",
                 style={"justify_content": "flex-end", "gap": "6px"},
             ),
-            rx.el.a(
-                "Open PR",
-                class_name="btn btn-ghost",
-                href="/",
-                style={"text_decoration": "none"},
+            rx.el.button(
+                "Details", class_name="btn btn-ghost", on_click=S.set_focus(name)
             ),
         ),
         allow,

@@ -1,5 +1,6 @@
 """Releases: promote staging to main, then tag an immutable release."""
 
+import asyncio
 from typing import Any
 
 import reflex as rx
@@ -24,6 +25,7 @@ SHA = {"color": "var(--faint)", "font_size": "11.5px"}
 
 class ReleasesState(AppState):
     overview: dict[str, Any] = {}
+    notes: str = ""
 
     @rx.var
     def items(self) -> list[dict[str, Any]]:
@@ -60,23 +62,45 @@ class ReleasesState(AppState):
         self.load_shell()
         try:
             self.overview = core.release_overview(self._ctx()).model_dump(mode="json")
+            self.notes = self.overview.get("notes", "")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
 
     @rx.event
-    def promote(self) -> None:
+    def set_notes(self, value: str) -> None:
+        self.notes = value
+
+    @rx.event(background=True)
+    async def promote(self) -> None:
+        """``promote`` in a worker thread; progress lines reach the header."""
+        async with self:
+            if self.busy:
+                return
+            self.busy, self.progress = True, "Promote started"
+        lines: list[str] = []
         try:
-            result = core.promote(self._ctx())
+            ctx = self._ctx(lines.append)
+            task = asyncio.create_task(asyncio.to_thread(core.promote, ctx))
+            while not task.done():
+                await asyncio.sleep(0.3)
+                async with self:
+                    self.progress = lines[-1] if lines else self.progress
+            result = task.result()
             url = result.pull_request.url if result.pull_request else ""
-            self._say(f"Promote PR {result.status} {url}".strip())
+            async with self:
+                self._say(f"Promote PR {result.status} {url}".strip())
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
-            self._fail(exc)
-        self.load()
+            async with self:
+                self._fail(exc)
+        finally:
+            async with self:
+                self.busy, self.progress = False, ""
+                self.load()
 
     @rx.event
     def tag(self) -> None:
         try:
-            result = core.release(self._ctx())
+            result = core.release(self._ctx(), notes=self.notes)
             self._say(f"Release {result.tag}: {result.status}")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
@@ -104,7 +128,11 @@ def _tag_row(t: rx.Var) -> rx.Component:
             class_name="mono",
             style={"flex": "1"},
         ),
-        rx.el.span(f"{t['items']} items · {t['clients']} clients", style=FAINT_12),
+        rx.el.span(
+            f"{t['items']} items · {t['clients']} ",
+            rx.cond(t["clients"].to(int) == 1, "client", "clients"),
+            style=FAINT_12,
+        ),
         class_name="row",
         style={"padding": "9px 14px", "border_bottom": "1px solid var(--line)"},
     )
@@ -168,7 +196,7 @@ def releases_page() -> rx.Component:
                     panel(panel_head("In this promotion", chip(S.items.length())), rx.foreach(S.items, _item_row)),
                     rx.el.div(
                         rx.el.label("Release notes", html_for="notes", style={"font_weight": "600"}),
-                        rx.el.textarea(o["notes"].to(str), id="notes", class_name="field field-area mono", rows="6", read_only=True),
+                        rx.el.textarea(id="notes", class_name="field field-area mono", rows="6", value=S.notes, on_change=S.set_notes),
                         rx.el.span("Drafted from the merged candidate PRs. Used as the tag message.", style=FAINT_12),
                         style={"display": "flex", "flex_direction": "column", "gap": "6px"},
                     ),

@@ -23,8 +23,16 @@ KIND = {"skill": "skill", "agent": "agent", "mcp_server": "mcp"}
 
 
 def spec(part: dict[str, Any]) -> str:
-    """``source:plugin/kind/name`` of a part."""
-    return f"{part['source']}:{part['plugin']}/{part['kind']}/{part['name']}"
+    """The ``spec`` core put on a part."""
+    return part["spec"]
+
+
+def _part(part: core.PartInfo) -> dict[str, Any]:
+    return {**part.model_dump(), "spec": part.spec}
+
+
+def _bundle(bundle: core.BundleInfo) -> dict[str, Any]:
+    return {**bundle.model_dump(), "parts": [_part(p) for p in bundle.parts]}
 
 
 class BundlesState(AppState):
@@ -77,23 +85,19 @@ class BundlesState(AppState):
 
     @rx.var
     def next_version(self) -> str:
-        version = self.current.get("version") or ""
-        bits = version.split(".")
-        if len(bits) == 3 and bits[2].isdigit():  # noqa: PLR2004
-            return f"{version} → {bits[0]}.{bits[1]}.{int(bits[2]) + 1}"
-        return "0.1.0"
+        current = self.current
+        if not current:
+            return "0.1.0"
+        return f"{current.get('version')} → {current.get('next_version')}"
 
     @rx.event
     def load(self) -> None:
         self.load_shell()
         try:
             ctx = self._ctx()
-            self.bundles = [b.model_dump() for b in core.bundles_overview(ctx)]
-            local = [
-                i.id
-                for i in core.Registry.load(ctx.repo).items.items
-                if i.kind.value == "local"
-            ]
+            overview = core.bundles_overview(ctx)
+            self.bundles = [_bundle(b) for b in overview.bundles]
+            local = overview.local
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
             return
@@ -111,9 +115,8 @@ class BundlesState(AppState):
 
     def _load_plugin(self, source: str, plugin: str) -> None:
         try:
-            parts = [
-                p.model_dump() for p in core.plugin_parts(self._ctx(), source, plugin)
-            ]
+            found = core.plugin_parts(self._ctx(), source, plugin)
+            parts = [_part(p) for p in found.parts]
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
             return
@@ -230,7 +233,7 @@ def _part_row(p: rx.Var) -> rx.Component:
         rx.el.span(f"@ {p['commit'].to(str)[:12]}", class_name="mono", style={"color": "var(--muted)"}),
         rx.el.span(p["license"], class_name="mono", style={"color": "var(--muted)"}),
         rx.cond(p["new"].to(bool), chip("new", "warn"), rx.cond(local, chip("local"), chip("pinned", "add"))),
-        rx.el.button(icon("x", 14), class_name="btn btn-ghost", aria_label=f"Remove {p['name']}", on_click=S.toggle(f"{p['source']}:{p['plugin']}/{p['kind']}/{p['name']}")),
+        rx.el.button(icon("x", 14), class_name="btn btn-ghost", aria_label=f"Remove {p['name']}", on_click=S.toggle(p["spec"].to(str))),
         style={"display": "flex", "flex_wrap": "wrap", "align_items": "center", "gap": "8px 14px", "padding": "10px 14px", "border_bottom": "1px solid var(--line)"},
     )  # fmt: skip
 

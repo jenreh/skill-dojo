@@ -19,15 +19,6 @@ from skill_dojo_web.shell import (
 from skill_dojo_web.state import AppState
 
 
-def flag_tone(kind: str) -> str:
-    """bad / warn / info color of a risk flag kind."""
-    if kind.startswith(("mcp-", "hook-", "binary", "symlink")):
-        return "bad" if kind.startswith("mcp-") else "warn"
-    if set(kind.split("-")) & {"network", "script", "executable", "tool", "tools"}:
-        return "warn"
-    return "info"
-
-
 class ReviewState(AppState):
     entries: list[dict[str, Any]] = []
     quarantined: list[str] = []
@@ -57,7 +48,7 @@ class ReviewState(AppState):
         return [
             {
                 **f,
-                "tone": flag_tone(f["kind"]),
+                "tone": core.flag_severity(f["kind"]),
                 "where": f["path"] + (f":{f['line']}" if f.get("line") else ""),
             }
             for f in self.detail.get("flags", [])
@@ -102,7 +93,7 @@ class ReviewState(AppState):
                 "item": e.item or e.pull_request.head,
                 "kind": e.kind or "new",
                 "title": e.pull_request.title,
-                "pin": e.pull_request.title.partition(" @ ")[2],
+                "pin": e.pin,
                 "flags": e.flags,
                 "age": (e.pull_request.created_at or "")[:10],
             }
@@ -154,38 +145,22 @@ class ReviewState(AppState):
     def set_stable(self, value: bool) -> None:
         self.stable = value
 
-    def _policy_changed(self) -> bool:
-        d = self.detail
-        return (
-            self.tier != d.get("risk_tier")
-            or self.classification != d.get("data_classification")
-            or {"beta": self.beta, "stable": self.stable}
-            != {c: c in d.get("channels", []) for c in ("beta", "stable")}
-        )
-
     @rx.event
     def approve(self) -> None:
         number = self.selected
+        channels = [
+            c
+            for c, on in ((Channel.BETA, self.beta), (Channel.STABLE, self.stable))
+            if on
+        ]
         try:
-            ctx = self._ctx()
-            if self._policy_changed():
-                channels = [
-                    c
-                    for c, on in (
-                        (Channel.BETA, self.beta),
-                        (Channel.STABLE, self.stable),
-                    )
-                    if on
-                ]
-                core.review_policy(
-                    ctx,
-                    number,
-                    risk_tier=RiskTier(self.tier),
-                    data_classification=self.classification,
-                    channels=channels,
-                )
-            head = core.review_show(ctx, number).pull_request.head_oid
-            result = core.review_approve(ctx, number, head=head)
+            result = core.review_decide(
+                self._ctx(),
+                number,
+                risk_tier=RiskTier(self.tier),
+                data_classification=self.classification,
+                channels=channels,
+            )
             self._say(f"PR #{number}: {result.status}", ok=result.status == "merged")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
@@ -235,7 +210,7 @@ def _queue_row(entry: rx.Var) -> rx.Component:
         rx.el.span(
             rx.cond(
                 flags > 0,
-                chip(f"{flags} flag(s)", rx.cond(flags > 2, "bad", "warn")),
+                chip(rx.cond(flags == 1, "1 flag", f"{flags} flags"), rx.cond(flags > 2, "bad", "warn")),
                 chip("no flags", "add"),
             ),
             rx.el.span(f"PR #{entry['number']}", class_name="mono", style={"color": "var(--faint)", "font_size": "11.5px"}),
@@ -265,7 +240,7 @@ def _queue() -> rx.Component:
     return rx.el.section(
         rx.el.div(heading("Review queue", "Candidate PRs into staging", "16px"), style={"padding": "0 6px"}),
         rx.el.div(
-            _filter_button("all", f"All {S.entries.length()}"),
+            _filter_button("all", f"All {S.entries.length() + S.quarantined.length()}"),
             _filter_button("flagged", f"Flagged {S.flagged_count}"),
             _filter_button("quarantined", f"Quarantined {S.quarantined.length()}"),
             class_name="row",

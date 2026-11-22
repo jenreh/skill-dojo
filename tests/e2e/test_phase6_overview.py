@@ -102,7 +102,7 @@ def test_release_overview_preview_audit_and_revoke(
     assert {"approval", "promotion", "release"} <= kinds
     assert "at,kind,actor" in audit_log(admin).csv()
 
-    (target,) = revoke_preview(admin)
+    (target,) = revoke_preview(admin).targets
     assert target.item == "hello"
     assert [c.name for c in target.affected] == ["web"]
     assert target.rollback_to is None

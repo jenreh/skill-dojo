@@ -24,6 +24,9 @@ from skill_dojo_core.commands.items import (
     lock_refresh,
 )
 from skill_dojo_core.commands.overview import (
+    RevokePreview,
+    PluginParts,
+    BundlesOverview,
     plugin_parts,
     bundles_overview,
     PartInfo,
@@ -58,6 +61,7 @@ from skill_dojo_core.commands.review import (
     ReviewListResult,
     ReviewShowResult,
     review_approve,
+    review_decide,
     review_list,
     review_policy,
     review_quarantine,
@@ -79,6 +83,7 @@ from skill_dojo_core.branches import base_branch, main_branch
 from skill_dojo_core.context import Context
 from skill_dojo_core.models import Channel, RiskTier
 from skill_dojo_core.registry import Registry
+from skill_dojo_core.risk import severity as flag_severity
 from skill_dojo_core.diffs import DiffFile, DiffLine
 from skill_dojo_core.errors import (
     ConflictError,
@@ -116,6 +121,7 @@ __all__ = [
     "BrowseResult",
     "BuildResult",
     "BundleInfo",
+    "BundlesOverview",
     "CandidateResult",
     "CatalogPreview",
     "Channel",
@@ -137,6 +143,7 @@ __all__ = [
     "NotFoundError",
     "NotImplementedYetError",
     "PartInfo",
+    "PluginParts",
     "PolicyBlock",
     "PolicyError",
     "PreviewResult",
@@ -155,6 +162,7 @@ __all__ = [
     "ReviewEntry",
     "ReviewListResult",
     "ReviewShowResult",
+    "RevokePreview",
     "RevokeResult",
     "RevokeTarget",
     "RiskFlag",
@@ -183,6 +191,7 @@ __all__ = [
     "clients_add",
     "clients_list",
     "clients_remove",
+    "flag_severity",
     "flags",
     "init",
     "local_add",
@@ -197,6 +206,7 @@ __all__ = [
     "release_overview",
     "repo_lock",
     "review_approve",
+    "review_decide",
     "review_detail",
     "review_list",
     "review_policy",

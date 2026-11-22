@@ -128,8 +128,11 @@ def _next_tag(repo: Path, day: str) -> str:
     return name
 
 
-def release(ctx: Context) -> ReleaseResult:
-    """Tag ``origin/main`` after checking that it validates."""
+def release(ctx: Context, *, notes: str | None = None) -> ReleaseResult:
+    """Tag ``origin/main`` after checking that it validates.
+
+    ``notes`` replaces the generated tag message (the UI lets the admin edit it).
+    """
     main = main_branch(Registry.load(ctx.repo))
     start = remote_start(ctx.repo, main)
     _fetch_tags(ctx.repo)
@@ -143,7 +146,11 @@ def release(ctx: Context) -> ReleaseResult:
         _check_valid(wt, main)
     with repo_lock(ctx.repo):
         tag = _next_tag(ctx.repo, f"{ctx.now:%Y.%m.%d}")
-        notes = release_notes(ctx.repo, previous, commit, tag)
+        notes = (
+            notes.strip() + "\n"
+            if notes and notes.strip()
+            else release_notes(ctx.repo, previous, commit, tag)
+        )
         git.run(ctx.repo, "tag", "-a", tag, "-m", notes, commit)
         # If another run pushed this tag first, the push fails and nothing moves.
         git.run(ctx.repo, "push", "-q", "origin", f"refs/tags/{tag}")

@@ -6,6 +6,7 @@ reviewer or a check is reported as ``waiting``.
 """
 
 import logging
+import re
 
 from pydantic import Field
 
@@ -39,6 +40,7 @@ class ReviewEntry(Result):
     item: str | None = None
     kind: str | None = Field(default=None, description="Kind on staging; None if new")
     flags: int = Field(default=0, description="Risk flag rows in the PR body")
+    pin: str = Field(default="", description="Upstream pin the candidate holds")
 
 
 class ReviewListResult(Result):
@@ -71,6 +73,15 @@ def tool_pull_request(ctx: Context, number: int) -> PullRequest:
     return pr
 
 
+PIN_RE = re.compile(r"skill-dojo:candidate item=\S+ commit=(\S+)")
+
+
+def _pin(body: str) -> str:
+    """The upstream pin from the candidate marker the tool writes."""
+    match = PIN_RE.search(body)
+    return match[1] if match else ""
+
+
 def review_list(ctx: Context) -> ReviewListResult:
     """Open candidate PRs into staging, and the items quarantined there."""
     base = base_branch(Registry.load(ctx.repo))
@@ -87,6 +98,7 @@ def review_list(ctx: Context) -> ReviewListResult:
                 item=item_id,
                 kind=item.kind.value if item else None,
                 flags=len(FLAG_ROW.findall(pr.body)),
+                pin=_pin(pr.body),
             )
         )
     quarantined = [i.id for i in staged.items if i.quarantined]
@@ -225,3 +237,34 @@ def review_policy(
         item=item_id,
         status="updated" if pushed else "unchanged",
     )
+
+
+def review_decide(  # noqa: PLR0913
+    ctx: Context,
+    number: int,
+    *,
+    risk_tier: RiskTier,
+    data_classification: str,
+    channels: list[Channel],
+) -> ReviewActionResult:
+    """Approve a candidate with this policy: a changed tier, classification or
+    channel list is committed first, then the new head is approved and merged."""
+    pr = tool_pull_request(ctx, number)
+    item_id = candidate_item(pr.head)
+    head = git.fetch_branch(ctx.repo, pr.head)
+    item = model_at(ctx.repo, head, ITEMS, ItemsFile).get(item_id or "")
+    current = (
+        (item.risk_tier, item.data_classification, item.supported_channels)
+        if item
+        else None
+    )
+    if current != (risk_tier, data_classification, channels):
+        review_policy(
+            ctx,
+            number,
+            risk_tier=risk_tier,
+            data_classification=data_classification,
+            channels=channels,
+        )
+    fresh = ctx.github.get_pull_request(number)
+    return review_approve(ctx, number, head=fresh.head_oid)
