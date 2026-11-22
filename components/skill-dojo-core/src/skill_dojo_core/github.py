@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 PR_FIELDS = (
     "number,url,title,body,headRefName,baseRefName,state,author,"
-    "headRefOid,isCrossRepository"
+    "headRefOid,isCrossRepository,createdAt"
 )
 MERGED_FIELDS = f"{PR_FIELDS},mergedAt,mergeCommit,mergedBy"
 # mergeStateStatus values where a merge waits for something a human must do.
@@ -42,6 +42,7 @@ class PullRequest(Result):
     merged_at: str | None = None
     merge_commit: str | None = None
     merged_by: str | None = None
+    created_at: str | None = None
 
 
 class Review(Result):
@@ -115,6 +116,7 @@ def _pull_request(data: dict[str, Any]) -> PullRequest:
         merged_at=data.get("mergedAt"),
         merge_commit=(data.get("mergeCommit") or {}).get("oid"),
         merged_by=_login(data.get("mergedBy")),
+        created_at=data.get("createdAt"),
     )
 
 

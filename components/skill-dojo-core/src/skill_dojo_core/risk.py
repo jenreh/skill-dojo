@@ -62,6 +62,10 @@ TOOL_KEYS = ("allowed-tools", "allowedTools", "tools")
 TOOL_DIRS = frozenset({"skills", "commands", "agents"})
 
 
+# A flag row of ``render``'s table: | `kind` | ...
+FLAG_ROW = re.compile(r"^\| `[a-z0-9-]+` \|", re.MULTILINE)
+
+
 class RiskFlag(Result):
     kind: str
     path: str
@@ -383,3 +387,19 @@ def render(flags: list[RiskFlag]) -> str:
         detail = flag.detail.replace("|", "\\|")
         lines.append(f"| `{flag.kind}` | `{flag.path}` | {line} | {detail} |")
     return "\n".join(lines)
+
+
+def severity(kind: str) -> str:
+    """How loud a flag is shown: ``bad``, ``warn`` or ``info``."""
+    if kind.startswith("mcp-"):
+        return "bad"
+    words = set(kind.split("-"))
+    if kind.startswith(("hook-", "binary", "symlink")) or words & {
+        "network",
+        "script",
+        "executable",
+        "tool",
+        "tools",
+    }:
+        return "warn"
+    return "info"

@@ -383,6 +383,16 @@ IMPORTANT: use the claude design prototype designed here: <https://claude.ai/art
 Done: state unit tests (`reflex-testing-state`); a Playwright smoke run of each page
 against a fixture curated repo; approving in the UI merges the fake PR.
 
+As built: `serve` writes `rxconfig.py` plus the packaged assets into the user cache and
+runs `reflex run --env prod --single-port` there. The pages use appkit-mantine components only;
+the prototype's palette, radius and fonts are the Mantine theme (`theme.py`). Each
+page is a package `pages/<name>/` with `page.py`, `state.py` and `components/`. Read models for the pages live in core (`commands/overview.py`):
+`review_detail`, `release_overview`, `marketplace_preview`, `audit_log`,
+`revoke_preview`, `bundles_overview`, `plugin_parts`; new writes are
+`review_policy` and `source_allow`. The bundle form shows Category where the design
+had Display name (bundles have no display name field). The smoke run was done by hand
+in a browser against a fixture repo; an automated Playwright run is still open.
+
 ## Phase 7: Hardening and first release
 
 1. Full spec verification list as one e2e suite (no network); coverage ≥ 80 %.

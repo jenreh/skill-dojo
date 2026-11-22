@@ -130,7 +130,7 @@ class Picked:
     licenses: dict[str, Path] = field(default_factory=dict)
 
 
-def _servers(files: dict[str, Path]) -> tuple[str, dict[str, Any]]:
+def plugin_servers(files: dict[str, Path]) -> tuple[str, dict[str, Any]]:
     """The first MCP config (file, servers) of a plugin."""
     for rel in (builder.CLAUDE_MCP, builder.ROOT_MCP, *hashing.MANIFESTS):
         if rel not in files:
@@ -182,7 +182,7 @@ def pick(spec: PartSpec, files: dict[str, Path], upstream: Upstream) -> Picked:
             raise NotFoundError(f"{spec.plugin} has no agent '{spec.name}'")
         chosen, path = {rel: files[rel]}, f"{base}/{rel}"
     else:
-        rel, servers = _servers(files)
+        rel, servers = plugin_servers(files)
         server = servers.get(spec.name)
         if not isinstance(server, dict):
             raise NotFoundError(f"{spec.plugin} has no MCP server '{spec.name}'")

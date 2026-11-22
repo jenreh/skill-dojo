@@ -12,6 +12,8 @@ from tests.support.fixture_repos import FixtureRepos
 
 NOW = datetime(2026, 11, 21, 10, 0, tzinfo=UTC)
 
+pytest_plugins = ["tests.support.curated"]
+
 
 @pytest.fixture(autouse=True)
 def isolated_git(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:

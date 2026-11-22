@@ -68,6 +68,25 @@ def test_build_check_fails_on_changes(repo: Path) -> None:
     assert "Changed:" in changed.output
 
 
+def test_build_keeps_workflows_of_the_pinned_tool(repo: Path) -> None:
+    invoke("init", "--tool-version", "1.2.3")
+    validate = repo / ".github/workflows/validate-marketplace.yml"
+    sync = repo / ".github/workflows/sync-upstream.yml"
+    older = "jobs:\n  v:\n    steps:\n      - run: uvx skill-dojo==1.2.3 validate\n"
+    validate.write_text(older)
+    sync.unlink()
+    result = invoke("build", "--check")
+    assert result.exit_code == 1
+    assert ".github/workflows/sync-upstream.yml" in result.output
+    assert "validate-marketplace" not in result.output
+    invoke("build")
+    assert validate.read_text() == older
+    config = repo / "registry/config.yaml"
+    config.write_text(config.read_text().replace("1.2.3", "1.2.4"))
+    invoke("build")
+    assert "uvx skill-dojo==1.2.4 build --check" in validate.read_text()
+
+
 def test_init_pin_defaults_and_conflicts(repo: Path) -> None:
     result = runner.invoke(
         app, ["init", "--tool-git", "1" * 40, "--tool-version", "1.0.0"]

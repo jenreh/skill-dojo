@@ -330,7 +330,7 @@ def test_catalog_cannot_point_a_remote_source_at_local_repos(
         return hub.head
 
     monkeypatch.setattr(candidates, "checkout_source", fake_checkout)
-    source_add(admin, "hub", "acme/hub")
+    source_add(admin, "hub", "acme/hub", kind=SourceType.AGENT_PLUGINS_MARKETPLACE)
     with pytest.raises(InvalidInputError, match="local repository"):
         mirror(admin, "hub", "far")
 
@@ -416,3 +416,22 @@ def test_unsupported_catalog_entry_has_a_clear_error(
     assert browse(admin, "npm").plugins[0].unsupported
     with pytest.raises(InvalidInputError, match="cannot be mirrored"):
         mirror(admin, "npm", "pkg")
+
+
+def test_source_type_is_detected_and_browse_needs_no_origin(
+    fixture_repos: FixtureRepos, make_context: MakeContext
+) -> None:
+    """A repo without a remote: the source type comes from the upstream."""
+    _, clone = fixture_repos.curated()
+    git(clone, "remote", "remove", "origin")
+    ctx = make_context(clone)
+    init(ctx, name="acme", tool=ToolPin(git="0" * 40))
+    claude = fixture_repos.claude_marketplace()
+    ap = fixture_repos.agent_plugins_marketplace()
+    added = source_add(ctx, "cl", claude.url)
+    assert added.sources[-1].type is SourceType.CLAUDE_MARKETPLACE
+    source_add(ctx, "ap", ap.url)
+    assert source_list(ctx).sources[-1].type is SourceType.AGENT_PLUGINS_MARKETPLACE
+    offered = browse(ctx, "cl")
+    assert offered.plugins
+    assert offered.tracked == {}

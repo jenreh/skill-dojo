@@ -22,8 +22,11 @@ def source_add(
         ),
     ],
     kind: Annotated[
-        SourceType, typer.Option("--type", help="What the repository holds.")
-    ] = SourceType.AGENT_PLUGINS_MARKETPLACE,
+        SourceType | None,
+        typer.Option(
+            "--type", help="What the repository holds (default: detected from it)."
+        ),
+    ] = None,
     ref: Annotated[str, typer.Option(help="Branch or tag to track.")] = "main",
     marketplace_path: Annotated[
         str | None, typer.Option(help="Catalog path if not the default.")
@@ -75,4 +78,8 @@ def browse(
         version = f" {plugin.version}" if plugin.version else ""
         where = f" ({plugin.repository})" if plugin.repository != result.source else ""
         note = f"  [cannot mirror: {plugin.unsupported}]" if plugin.unsupported else ""
+        if not plugin.allowed:
+            note += "  [not on the allowlist]"
+        if plugin.name in result.tracked:
+            note += f"  [{result.tracked[plugin.name]}]"
         typer.echo(f"  {plugin.name}{version}  {plugin.path}{where}{note}")

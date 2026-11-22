@@ -1,7 +1,7 @@
 [project]
 name = "skill-dojo-web"
 version = "0.0.0"
-description = "Local web UI of skill-dojo (Reflex + appkit-mantine)."
+description = "Local web UI of skill-dojo (Reflex)."
 readme = "README.md"
 authors = [{ name = "Jens Rehpöhler" }]
 license = { text = "MIT" }

@@ -93,6 +93,67 @@ EXAMPLES: list[BaseModel] = [
         back_merge=PR,
         affected_clients=[CLIENT],
     ),
+    skill_dojo_core.ReviewDetail(
+        number=1,
+        url="u",
+        title="t",
+        item="hello",
+        head="candidate/hello/abc",
+        risk_tier="standard",
+        data_classification="internal",
+        flags=[RiskFlag(kind="mcp-server-added", path=".mcp.json", detail="d")],
+        files=[
+            skill_dojo_core.DiffFile(
+                path="a",
+                added=1,
+                lines=[skill_dojo_core.DiffLine(kind="+", number=1, text="x")],
+            )
+        ],
+    ),
+    skill_dojo_core.ReleaseOverview(
+        staging="staging",
+        main="main",
+        staging_head="abc",
+        main_head="def",
+        commits_ahead=2,
+        items=[skill_dojo_core.PromotionItem(item="hello", reviewers=["bob"])],
+        tags=[
+            skill_dojo_core.TagInfo(tag="marketplace-v2026.11.21", commit="c", items=1)
+        ],
+    ),
+    skill_dojo_core.PreviewResult(
+        base="staging",
+        base_head="abc",
+        tree=[skill_dojo_core.TreeEntry(path="plugins/", depth=0)],
+        catalogs=[
+            skill_dojo_core.CatalogPreview(path="p", changes=[], full=[], text="{}")
+        ],
+        pending=[],
+        errors=0,
+        warnings=[],
+    ),
+    skill_dojo_core.AuditResult(
+        events=[
+            skill_dojo_core.AuditEvent(
+                kind="release", at="2026-11-21", actor="a", action="released"
+            )
+        ]
+    ),
+    skill_dojo_core.RevokeTarget(item="hello", rollback_to="marketplace-v2026.11.21"),
+    skill_dojo_core.BundleInfo(
+        id="kit", parts=[skill_dojo_core.PartInfo(kind="skill", name="greet")]
+    ),
+    skill_dojo_core.PartInfo(kind="agent", name="helper"),
+    skill_dojo_core.AuditEvent(kind="sync", at="", actor="a", action="opened"),
+    skill_dojo_core.TreeEntry(path="plugins/hello/", depth=1, status="A"),
+    skill_dojo_core.DiffLine(kind="…", text=""),
+    skill_dojo_core.DiffFile(path="b"),
+    skill_dojo_core.PromotionItem(item="kit", kind="bundle"),
+    skill_dojo_core.TagInfo(tag="marketplace-v2026.11.21.2", commit="c"),
+    skill_dojo_core.CatalogPreview(path="q", changes=[], full=[], text=""),
+    skill_dojo_core.RevokePreview(targets=[]),
+    skill_dojo_core.BundlesOverview(local=["tools"]),
+    skill_dojo_core.PluginParts(parts=[]),
 ]
 
 

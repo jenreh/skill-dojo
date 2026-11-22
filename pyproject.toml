@@ -243,6 +243,23 @@ exclude = [
 [tool.ty.rules]
 import-not-found = "warn"
 
+# Reflex builds components from dynamic Vars (``state.field["key"]``, Var
+# methods, ``**props``) that ty cannot see through. Only the UI markup and its
+# state tests get these rules relaxed; core and CLI keep full checking.
+[[tool.ty.overrides]]
+include = [
+    "components/skill-dojo-web/src/skill_dojo_web/pages/**",
+    "components/skill-dojo-web/src/skill_dojo_web/components/**",
+    "components/skill-dojo-web/src/skill_dojo_web/app.py",
+    "components/skill-dojo-web/tests/**",
+]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+not-subscriptable = "ignore"
+missing-attribute = "ignore"
+unknown-argument = "ignore"
+
 [tool.coverage.run]
 branch = true
 source = ["skill_dojo_core", "skill_dojo_cli", "skill_dojo_web"]

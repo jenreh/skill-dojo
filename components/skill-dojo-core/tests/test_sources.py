@@ -98,3 +98,19 @@ def test_plain_git_plugins(tmp_path: Path) -> None:
     assert [(p.name, p.version) for p in sources.list_plugins(source, tmp_path)] == [
         ("p", "2")
     ]
+
+
+def test_normalize_repository() -> None:
+    github = "https://github.com/anthropics/skills"
+    assert sources.normalize_repository("anthropics/skills") == github
+    assert sources.normalize_repository(" anthropics/skills ") == github
+    assert sources.normalize_repository("github.com/anthropics/skills") == github
+    assert sources.normalize_repository(f"{github}.git") == f"{github}.git"
+    assert (
+        sources.normalize_repository("git@github.com:o/r.git")
+        == "git@github.com:o/r.git"
+    )
+    assert sources.normalize_repository("file:///tmp/x.git") == "file:///tmp/x.git"
+    for bad in ("", "skills", "a/b/c", "-o/r", "http//x"):
+        with pytest.raises(InvalidInputError):
+            sources.normalize_repository(bad)
