@@ -1,6 +1,6 @@
 [project]
 name = "skill-dojo-web"
-version = "0.0.0"
+version = "0.0.1"
 description = "Local web UI of skill-dojo (Reflex)."
 readme = "README.md"
 authors = [{ name = "Jens Rehpöhler" }]

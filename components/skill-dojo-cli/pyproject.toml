@@ -1,6 +1,6 @@
 [project]
 name = "skill-dojo"
-version = "0.0.0"
+version = "0.0.1"
 description = "Curate agent plugin marketplaces, skills and MCP servers in a git repo."
 readme = "README.md"
 authors = [{ name = "Jens Rehpöhler" }]
@@ -12,7 +12,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
-    "skill-dojo-core==0.0.0",
+    "skill-dojo-core==0.0.1",
     "typer>=0.29.2",
 ]
 
