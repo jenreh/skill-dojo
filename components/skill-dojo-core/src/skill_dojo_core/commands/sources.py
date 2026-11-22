@@ -119,14 +119,7 @@ def checkout_source(ctx: Context, source: Source, dest: Path) -> str:
 def browse_servers(source: Source, search: str | None) -> BrowseResult:
     """The servers an MCP Registry offers, at their latest version."""
     offered = [
-        UpstreamPlugin(
-            name=entry.name,
-            path=".",
-            repository=source.repository,
-            version=entry.version,
-            description=entry.description,
-            unsupported=mcp_registry.unsupported(entry),
-        )
+        mcp_registry.offered(entry, source.repository)
         for entry in mcp_registry.list_servers(source.repository, search)
         if not source.allowlist or entry.name in source.allowlist
     ]

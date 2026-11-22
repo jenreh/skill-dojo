@@ -154,13 +154,7 @@ def fetch_server(source: Source, name: str, item_id: str, tmp: Path) -> Fetched:
     ).items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text(text, encoding="utf-8")
-    plugin = sources.UpstreamPlugin(
-        name=entry.name,
-        path=".",
-        repository=source.repository,
-        version=entry.version,
-        description=entry.description,
-    )
+    plugin = mcp_registry.offered(entry, source.repository)
     return Fetched(root, plugin, source.repository, entry.version, pinned.pin)
 
 
@@ -175,7 +169,9 @@ def fetch_plugin(
     if source.allowlist and name not in source.allowlist:
         raise InvalidInputError(f"'{name}' is not in the allowlist of '{source.id}'")
     if source.type is SourceType.MCP_REGISTRY:
-        return fetch_server(source, name, item_id or name, tmp)
+        return fetch_server(
+            source, name, item_id or mcp_registry.default_item_id(name), tmp
+        )
     commit = checkout_source(ctx, source, tmp / "src")
     offered = {p.name: p for p in sources.list_plugins(source, tmp / "src")}
     plugin = offered.get(name)
@@ -392,7 +388,10 @@ def make_candidate(
         with tempfile.TemporaryDirectory(prefix="skill-dojo-up-") as tmp:
             fetched = fetch_plugin(ctx, source, name, Path(tmp), item_id)
             old = staged.lock.items.get(item_id)
-            if old is not None and old.upstream.commit == fetched.commit:
+            same_pin = old is not None and old.upstream.commit == fetched.commit
+            # A new MCP Registry version may keep the package pin but change
+            # arguments or env vars: then the built tree decides.
+            if same_pin and old is not None and old.upstream.ref == fetched.ref:
                 return CandidateResult(
                     item=item_id, commit=fetched.commit, branch="", status="up-to-date"
                 )

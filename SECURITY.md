@@ -40,3 +40,7 @@ this repository, or contact the maintainers directly.
 - Package names, image references and environment variable names are checked before
   they reach `.mcp.json`, so a registry entry cannot inject command-line options.
   Secrets are never copied: environment variables become `${NAME}` placeholders.
+- The registry's `runtimeArguments` are dropped: placed before the pinned reference
+  they could make `npx`, `uvx` or `docker` run another package, index or image.
+  `validate` also reports a runner option that switches the registry or index before
+  the package, and checks the digest on the image `docker run` really starts.

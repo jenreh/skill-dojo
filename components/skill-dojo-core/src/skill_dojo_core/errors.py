@@ -47,6 +47,10 @@ class ExternalToolError(SkillDojoError):
     code = "external_tool"
 
 
+class RegistryError(ExternalToolError):
+    """The MCP Registry or a container registry answered with an error."""
+
+
 def not_implemented(command: str) -> NoReturn:
     """Raise for a command whose phase has not landed yet."""
     raise NotImplementedYetError(f"'{command}' is not implemented yet")

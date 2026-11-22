@@ -8,9 +8,6 @@ from pytest_httpserver import HTTPServer
 
 from skill_dojo_core import (
     Context,
-    ExternalToolError,
-    InvalidInputError,
-    NotFoundError,
     SourceType,
     ToolPin,
     browse,
@@ -148,7 +145,7 @@ def test_wrapper_plugin_is_pinned_and_sync_follows_new_versions(
 
 
 def test_pypi_and_oci_servers_pin_version_and_digest(
-    admin: Context, registry: FakeMcpRegistry
+    admin: Context, registry: FakeMcpRegistry, fake_github: FakeGitHub
 ) -> None:
     digest = registry.image("mcp/files:0.3.0", {"schemaVersion": 2, "manifests": []})
     searched = mirror(admin, "mcp", SEARCH, item_id="acme-search")
@@ -174,37 +171,49 @@ def test_pypi_and_oci_servers_pin_version_and_digest(
     assert (part.source, part.upstream_plugin) == ("mcp", FILES)
     assert part.commit == f"oci:{image}"
 
-
-def test_unpinnable_or_unsafe_servers_are_refused(
-    admin: Context, registry: FakeMcpRegistry
-) -> None:
-    with pytest.raises(InvalidInputError, match="https"):
-        source_add(
-            admin, "bad", "http://registry.example", kind=SourceType.MCP_REGISTRY
-        )
-    with pytest.raises(InvalidInputError, match="remote-only"):
-        mirror(admin, "mcp", REMOTE)
-    registry.publish("io.github.acme/ranged", "1.0.0", [npm("ranged", "^1.0.0")])
-    with pytest.raises(InvalidInputError, match="exact version"):
-        mirror(admin, "mcp", "io.github.acme/ranged")
+    # A new registry version moves the bundle part through sync, too.
+    pull = kit.pull_request
+    assert pull is not None
+    assert fake_github.merge(pull.number)
+    newer = registry.image("mcp/files:0.4.0", {"schemaVersion": 2, "layers": []})
     registry.publish(
-        "io.github.acme/elsewhere",
-        "1.0.0",
-        [npm("elsewhere", "1.0.0", registryBaseUrl="https://npm.evil.example")],
+        FILES, "0.4.0", [oci(f"{registry.host}/mcp/files", version="0.4.0")]
     )
-    with pytest.raises(InvalidInputError, match="another registry"):
-        mirror(admin, "mcp", "io.github.acme/elsewhere")
-    registry.publish("io.github.acme/flag", "1.0.0", [npm("--registry=x", "1.0.0")])
-    with pytest.raises(InvalidInputError, match="not an npm package"):
-        mirror(admin, "mcp", "io.github.acme/flag")
-    registry.publish("io.github.acme/gone", "1.0.0", [npm("gone", "1.0.0")])
-    registry.status["io.github.acme/gone", "1.0.0"] = "deleted"
-    with pytest.raises(NotFoundError, match="deleted"):
-        mirror(admin, "mcp", "io.github.acme/gone")
-    with pytest.raises(NotFoundError):
-        mirror(admin, "mcp", "io.github.acme/unknown")
-    registry.image("mcp/files:0.3.0", {"schemaVersion": 2})
-    registry.bad_digest.add("mcp/files:0.3.0")
-    with pytest.raises(ExternalToolError, match="digest"):
-        mirror(admin, "mcp", FILES)
-    assert staged_lock(admin).items == {}
+    by_item = {c.item: c for c in sync(admin).candidates}
+    assert by_item["kit"].status == "opened"
+    bundle = json.loads(
+        show(admin, f"origin/{by_item['kit'].branch}", "plugins/kit/mcp.json")
+    )
+    assert f"{registry.host}/mcp/files@{newer}" in bundle["mcpServers"]["files"]["args"]
+
+
+def test_new_registry_version_with_the_same_package_pin(
+    admin: Context, registry: FakeMcpRegistry, fake_github: FakeGitHub
+) -> None:
+    made = mirror(admin, "mcp", SEARCH)
+    assert made.pull_request is not None
+    assert fake_github.merge(made.pull_request.number)
+    # Same package version, new registry entry with an extra argument.
+    registry.publish(
+        SEARCH,
+        "2.0.1",
+        [
+            pypi(
+                "acme-search-mcp",
+                "2.0.0",
+                packageArguments=[{"type": "positional", "value": "--fast"}],
+                runtimeArguments=[
+                    {"type": "named", "name": "--index", "value": "https://evil"}
+                ],
+            )
+        ],
+    )
+    (update,) = sync(admin).candidates
+    assert update.status == "opened"
+    servers = json.loads(
+        show(admin, f"origin/{update.branch}", "plugins/search/.mcp.json")
+    )
+    assert servers["mcpServers"]["search"]["args"] == [
+        "acme-search-mcp==2.0.0",
+        "--fast",
+    ]

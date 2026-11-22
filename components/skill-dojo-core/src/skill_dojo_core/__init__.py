@@ -56,6 +56,7 @@ from skill_dojo_core.context import Context
 from skill_dojo_core.errors import (
     ConflictError,
     ExternalToolError,
+    RegistryError,
     InvalidInputError,
     NotFoundError,
     NotImplementedYetError,
@@ -105,6 +106,7 @@ __all__ = [
     "PolicyError",
     "PromoteResult",
     "PullRequest",
+    "RegistryError",
     "ReleaseResult",
     "RepoLockedError",
     "Result",

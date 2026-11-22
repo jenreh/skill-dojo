@@ -17,8 +17,9 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from skill_dojo_core import builder, jsontext
-from skill_dojo_core.errors import ExternalToolError, InvalidInputError, NotFoundError
+from skill_dojo_core.errors import InvalidInputError, NotFoundError, RegistryError
 from skill_dojo_core.models import ITEM_ID_RE, SERVER_NAME_RE
+from skill_dojo_core.sources import UpstreamPlugin
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ NPM_REGISTRY = "https://registry.npmjs.org"
 PYPI_REGISTRY = "https://pypi.org"
 DOCKER_HUB = "docker.io"
 DOCKER_API = "registry-1.docker.io"
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 MANIFEST_TYPES = ", ".join(
     (
         "application/vnd.oci.image.index.v1+json",
@@ -48,14 +49,16 @@ MANIFEST_TYPES = ", ".join(
         "application/vnd.docker.distribution.manifest.v2+json",
     )
 )
+# registry type -> (command, leading args) that runs the pinned package
+RUNNERS: dict[str, tuple[str, list[str]]] = {
+    "npm": ("npx", ["-y"]),
+    "pypi": ("uvx", []),
+    "oci": ("docker", ["run", "-i", "--rm"]),
+}
 TIMEOUT = 30.0
 MAX_PAGES = 20
 PAGE_SIZE = 100
 UNAUTHORIZED = 401
-
-
-class RegistryError(ExternalToolError):
-    """The MCP Registry or a container registry answered with an error."""
 
 
 # --- the registry's data -----------------------------------------------------------
@@ -90,9 +93,6 @@ class Package(ApiModel):
     identifier: str
     version: str | None = None
     transport: Transport
-    runtime_arguments: list[Argument] = Field(
-        default_factory=list, alias="runtimeArguments"
-    )
     package_arguments: list[Argument] = Field(
         default_factory=list, alias="packageArguments"
     )
@@ -115,15 +115,22 @@ class ServerEntry(ApiModel):
     status: str = "active"
 
 
+def _official(data: dict[str, Any]) -> dict[str, Any]:
+    """The registry's own ``_meta`` of a response entry."""
+    meta = data.get("_meta")
+    official = meta.get(OFFICIAL) if isinstance(meta, dict) else None
+    return official if isinstance(official, dict) else {}
+
+
 def _entry(data: Any) -> ServerEntry:
     if not isinstance(data, dict) or not isinstance(data.get("server"), dict):
         raise RegistryError("MCP Registry: response has no 'server'")
-    meta = (data.get("_meta") or {}).get(OFFICIAL) or {}
+    meta = _official(data)
     try:
         entry = ServerEntry.model_validate(data["server"])
     except ValidationError as exc:
         raise RegistryError(f"MCP Registry: bad server entry: {exc}") from exc
-    status = meta.get("status") if isinstance(meta, dict) else None
+    status = meta.get("status")
     return entry.model_copy(update={"status": status or "active"})
 
 
@@ -133,7 +140,7 @@ def _entry(data: Any) -> ServerEntry:
 def check_url(url: str) -> str:
     """An https URL, or http to this machine (tests, a local mirror)."""
     parts = urlsplit(url)
-    local = parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1"}
+    local = parts.scheme == "http" and parts.hostname in LOCAL_HOSTS
     if (parts.scheme != "https" and not local) or not parts.hostname:
         raise InvalidInputError(f"'{url}' is not an https URL")
     if parts.username or parts.password or parts.query or parts.fragment:
@@ -186,15 +193,17 @@ def list_servers(base_url: str, search: str | None = None) -> list[ServerEntry]:
             cursor = metadata.get("nextCursor") if isinstance(metadata, dict) else None
             if not cursor:
                 break
+        else:
+            log.warning("MCP Registry: stopped after %d pages", MAX_PAGES)
     return sorted(found.values(), key=lambda e: e.name)
 
 
-def get_server(base_url: str, name: str, version: str = "latest") -> ServerEntry:
-    """One version of server ``name``; deleted versions are not served."""
+def get_server(base_url: str, name: str) -> ServerEntry:
+    """The latest version of server ``name``; a deleted one is not served."""
     if not SERVER_NAME_RE.match(name) or ".." in name:
         raise InvalidInputError(f"'{name}' is not an MCP server name")
     base = check_url(base_url)
-    path = f"servers/{quote(name, safe='')}/versions/{quote(version, safe='')}"
+    path = f"servers/{quote(name, safe='')}/versions/latest"
     url = f"{base}/{API}/{path}"
     with _client() as client:
         entry = _entry(_get_json(client, url))
@@ -203,6 +212,18 @@ def get_server(base_url: str, name: str, version: str = "latest") -> ServerEntry
     if entry.status == "deleted":
         raise NotFoundError(f"MCP server '{name}' was deleted from the registry")
     return entry
+
+
+def offered(entry: ServerEntry, repository: str) -> UpstreamPlugin:
+    """``entry`` as a plugin a source offers (with why it cannot be pinned)."""
+    return UpstreamPlugin(
+        name=entry.name,
+        path=".",
+        repository=repository,
+        version=entry.version,
+        description=entry.description,
+        unsupported=unsupported(entry),
+    )
 
 
 # --- pinning -------------------------------------------------------------------------
@@ -254,13 +275,13 @@ def _package_problem(package: Package) -> str | None:  # noqa: PLR0911
             return "npm package from another registry"
         if not NPM_RE.match(package.identifier):
             return f"'{package.identifier}' is not an npm package name"
-        return _exact(package.version)
+        return _version_problem(package.version)
     if kind == "pypi":
         if package.registry_base_url not in {None, PYPI_REGISTRY}:
             return "PyPI package from another index"
         if not PYPI_RE.match(package.identifier):
             return f"'{package.identifier}' is not a PyPI package name"
-        return _exact(package.version)
+        return _version_problem(package.version)
     if kind == "oci":
         match = OCI_RE.match(package.identifier)
         if match is None or ".." in package.identifier:
@@ -271,7 +292,7 @@ def _package_problem(package: Package) -> str | None:  # noqa: PLR0911
     return f"{kind} packages are not supported"
 
 
-def _exact(version: str | None) -> str | None:
+def _version_problem(version: str | None) -> str | None:
     if (
         version is None
         or version == "latest"
@@ -295,7 +316,8 @@ def pin(package: Package) -> Pinned:
         version = str(package.version)
         return Pinned(kind, name, version, f"{name}=={version}")
     match = OCI_RE.match(name)
-    assert match is not None  # noqa: S101 (checked above)
+    if match is None:
+        raise InvalidInputError(f"'{name}' is not an image reference")
     host = match["host"] or DOCKER_HUB
     repo = match["repo"]
     tag = match["tag"] or package.version or ""
@@ -310,7 +332,7 @@ def pin(package: Package) -> Pinned:
 def _api_base(host: str) -> str:
     if host == DOCKER_HUB:
         return f"https://{DOCKER_API}"
-    hostname = host.rsplit(":", 1)[0]
+    hostname = urlsplit(f"//{host}").hostname
     return f"{'http' if hostname in LOCAL_HOSTS else 'https'}://{host}"
 
 
@@ -401,23 +423,23 @@ def _arguments(arguments: list[Argument]) -> list[str]:
 
 
 def server_config(package: Package, pinned: Pinned) -> dict[str, Any]:
-    """The ``mcpServers`` entry that runs the pinned package."""
+    """The ``mcpServers`` entry that runs the pinned package.
+
+    The registry's ``runtimeArguments`` are never used: placed before the
+    pinned reference they could point the runner at another package, image or
+    registry. Package arguments come after it and only reach the server.
+    """
     env_names = [
         v.name for v in package.environment_variables if ENV_NAME_RE.match(v.name)
     ]
-    runtime = _arguments(package.runtime_arguments)
     args = _arguments(package.package_arguments)
-    if pinned.registry_type == "npm":
-        command, lead = "npx", ["-y"]
-    elif pinned.registry_type == "pypi":
-        command, lead = "uvx", []
-    else:
-        env_flags = [flag for name in env_names for flag in ("-e", name)]
-        command, lead = "docker", ["run", "-i", "--rm", *env_flags]
+    command, lead = RUNNERS[pinned.registry_type]
+    if pinned.registry_type == "oci":
+        lead = [*lead, *(flag for name in env_names for flag in ("-e", name))]
     config: dict[str, Any] = {
         "type": "stdio",
         "command": command,
-        "args": [*lead, *runtime, pinned.reference, *args],
+        "args": [*lead, pinned.reference, *args],
     }
     if env_names:
         config["env"] = {name: "${" + name + "}" for name in env_names}
