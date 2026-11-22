@@ -384,9 +384,9 @@ Done: state unit tests (`reflex-testing-state`); a Playwright smoke run of each 
 against a fixture curated repo; approving in the UI merges the fake PR.
 
 As built: `serve` writes `rxconfig.py` plus the packaged assets into the user cache and
-runs `reflex run --env prod --single-port` there. The pages are plain `rx.el` markup
-with the prototype's own CSS tokens (not appkit-mantine, which could not match the
-design exactly). Read models for the pages live in core (`commands/overview.py`):
+runs `reflex run --env prod --single-port` there. The pages use appkit-mantine components only;
+the prototype's palette, radius and fonts are the Mantine theme (`theme.py`). Each
+page is a package `pages/<name>/` with `page.py`, `state.py` and `components/`. Read models for the pages live in core (`commands/overview.py`):
 `review_detail`, `release_overview`, `marketplace_preview`, `audit_log`,
 `revoke_preview`, `bundles_overview`, `plugin_parts`; new writes are
 `review_policy` and `source_allow`. The bundle form shows Category where the design

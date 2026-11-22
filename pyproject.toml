@@ -249,8 +249,8 @@ import-not-found = "warn"
 [[tool.ty.overrides]]
 include = [
     "components/skill-dojo-web/src/skill_dojo_web/pages/**",
-    "components/skill-dojo-web/src/skill_dojo_web/shell.py",
-    "components/skill-dojo-web/src/skill_dojo_web/icons.py",
+    "components/skill-dojo-web/src/skill_dojo_web/components/**",
+    "components/skill-dojo-web/src/skill_dojo_web/app.py",
     "components/skill-dojo-web/tests/**",
 ]
 

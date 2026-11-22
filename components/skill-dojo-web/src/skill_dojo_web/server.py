@@ -33,7 +33,7 @@ config = rx.Config(
     cors_allowed_origins=["http://{host}:{port}"],
     telemetry_enabled=False,
     show_built_with_reflex=False,
-    plugins=[],
+    plugins=[rx.plugins.RadixThemesPlugin()],
     disable_plugins=[rx.plugins.SitemapPlugin],
 )
 """

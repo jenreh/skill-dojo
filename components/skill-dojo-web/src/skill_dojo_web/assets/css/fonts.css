@@ -1,0 +1,4 @@
+/* Bundled fonts (SIL OFL 1.1, see fonts/OFL-*.txt): the UI loads nothing from the web. */
+@font-face{font-family:Inter;font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/inter-latin-wght-normal.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 800;font-display:swap;src:url(/fonts/jetbrains-mono-latin-wght-normal.woff2) format('woff2')}
+@font-face{font-family:Jost;font-style:normal;font-weight:500;font-display:swap;src:url(/fonts/jost-latin-500-normal.woff2) format('woff2')}

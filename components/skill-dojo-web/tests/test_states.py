@@ -13,13 +13,13 @@ from reflex.state import State
 import skill_dojo_core as core
 from skill_dojo_core import Context, NotFoundError, mirror
 from skill_dojo_web import backend, server
-from skill_dojo_web.pages.audit import AuditState, day_label
-from skill_dojo_web.pages.bundles import BundlesState
-from skill_dojo_web.pages.clients import ClientsState
-from skill_dojo_web.pages.preview import PreviewState
-from skill_dojo_web.pages.releases import ReleasesState
-from skill_dojo_web.pages.review import ReviewState
-from skill_dojo_web.pages.sources import SourcesState
+from skill_dojo_web.pages.audit.state import AuditState, day_label
+from skill_dojo_web.pages.bundles.state import BundlesState
+from skill_dojo_web.pages.clients.state import ClientsState
+from skill_dojo_web.pages.preview.state import PreviewState
+from skill_dojo_web.pages.releases.state import ReleasesState
+from skill_dojo_web.pages.review.state import ReviewState
+from skill_dojo_web.pages.sources.state import SourcesState
 from skill_dojo_web.state import failure
 from tests.e2e.test_phase4_release import number
 from tests.support.fake_github import FakeGitHub
@@ -133,8 +133,9 @@ def test_releases_clients_preview_audit_bundles(
     preview = state(PreviewState)
     call(preview, "load")
     assert preview.current["path"] == ".agents/plugins/marketplace.json"
-    call(preview, "show_catalog", 1)
-    call(preview, "set_full", True)
+    call(preview, "set_catalog", "1")
+    call(preview, "set_view", "full")
+    assert preview.view == "full"
     assert preview.lines
 
     audit = state(AuditState)
@@ -168,7 +169,7 @@ def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         backend.repo_path()
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     work = server.prepare(server.cache_dir(), 8099)
-    assert (work / "assets" / "css" / "skill-dojo.css").is_file()
+    assert (work / "assets" / "css" / "fonts.css").is_file()
     assert "backend_port=8099" in (work / "rxconfig.py").read_text()
     assert "skill_dojo_web.app" in (work / "rxconfig.py").read_text()
     assert server.command(8099)[-3:] == ["8099", "--backend-host", "127.0.0.1"]

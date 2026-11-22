@@ -12,6 +12,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
+    "appkit-mantine>=1.19.1",
     "reflex>=0.11.0",
     "skill-dojo-core~=0.0.0",
 ]

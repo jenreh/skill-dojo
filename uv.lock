@@ -42,6 +42,18 @@ wheels = [
 ]
 
 [[package]]
+name = "appkit-mantine"
+version = "1.19.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "reflex" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/87/dc/f68959a45a6694fe7e0578cf1a3a51481f3d7f93319fc7f321bad341fe41/appkit_mantine-1.19.1.tar.gz", hash = "sha256:9c6253cf06115686929d713e7ea2082534875198c5eb469aaca7b08315e635b0", size = 281580, upload-time = "2026-11-14T18:02:34.643Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/04/880747e11b6d6d01cf542ae7293216d7d2ce46c5403de19a3c7aba92dc6c/appkit_mantine-1.19.1-py3-none-any.whl", hash = "sha256:dcfa5da038cf36fab8a7c46c5eafea4548a5cb23c4731e35331c645a0510fe7b", size = 348408, upload-time = "2026-11-14T18:02:28.863Z" },
+]
+
+[[package]]
 name = "bidict"
 version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1200,12 +1212,14 @@ name = "skill-dojo-web"
 version = "0.0.0"
 source = { editable = "components/skill-dojo-web" }
 dependencies = [
+    { name = "appkit-mantine" },
     { name = "reflex" },
     { name = "skill-dojo-core" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "appkit-mantine", specifier = ">=1.19.1" },
     { name = "reflex", specifier = ">=0.11.0" },
     { name = "skill-dojo-core", editable = "components/skill-dojo-core" },
 ]

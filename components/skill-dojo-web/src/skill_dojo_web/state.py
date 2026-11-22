@@ -27,7 +27,6 @@ def failure(exc: Exception) -> str:
 
 
 class AppState(rx.State):
-    theme: str = rx.LocalStorage("t-dark", name="skill-dojo-theme")
     repository: str = ""
     branch: str = "staging"
     actor: str = ""
@@ -39,7 +38,6 @@ class AppState(rx.State):
     notice_ok: bool = True
     busy: bool = False
     progress: str = ""
-    palette_open: bool = False
 
     @rx.var
     def initial(self) -> str:
@@ -53,18 +51,6 @@ class AppState(rx.State):
 
     def _fail(self, exc: Exception) -> None:
         self._say(failure(exc), ok=False)
-
-    @rx.event
-    def set_light(self) -> None:
-        self.theme = "t-light"
-
-    @rx.event
-    def set_dark(self) -> None:
-        self.theme = "t-dark"
-
-    @rx.event
-    def toggle_palette(self) -> None:
-        self.palette_open = not self.palette_open
 
     @rx.event
     def dismiss(self) -> None:
