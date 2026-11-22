@@ -14,13 +14,23 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from skill_dojo_core import builder, frontmatter, git, hashing, jsontext, risk, sources
+from skill_dojo_core import (
+    builder,
+    frontmatter,
+    git,
+    hashing,
+    jsontext,
+    mcp_registry,
+    risk,
+    sources,
+)
 from skill_dojo_core.branches import (
     base_branch,
     candidate_branch,
     commit_and_push,
     open_or_update,
     remote_start,
+    short_pin,
     view,
 )
 from skill_dojo_core.commands.sources import checkout_source, get_source
@@ -34,6 +44,7 @@ from skill_dojo_core.models import (
     ItemLock,
     Namespace,
     Source,
+    SourceType,
     Upstream,
 )
 from skill_dojo_core.registry import (
@@ -132,10 +143,35 @@ def tree_at(
 # --- fetching and normalizing --------------------------------------------------
 
 
-def fetch_plugin(ctx: Context, source: Source, name: str, tmp: Path) -> Fetched:
-    """Check out the source, find ``name`` and follow a remote plugin source."""
+def fetch_server(source: Source, name: str, item_id: str, tmp: Path) -> Fetched:
+    """Pin the latest version of MCP server ``name`` and write its wrapper."""
+    entry = mcp_registry.get_server(source.repository, name)
+    package = mcp_registry.choose_package(entry)
+    pinned = mcp_registry.pin(package)
+    root = tmp / "mcp"
+    for rel, text in mcp_registry.wrapper_files(
+        item_id, entry, pinned, package
+    ).items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    plugin = mcp_registry.offered(entry, source.repository)
+    return Fetched(root, plugin, source.repository, entry.version, pinned.pin)
+
+
+def fetch_plugin(
+    ctx: Context, source: Source, name: str, tmp: Path, item_id: str | None = None
+) -> Fetched:
+    """Check out the source, find ``name`` and follow a remote plugin source.
+
+    From the MCP Registry, the wrapper plugin of server ``name`` (named
+    ``item_id``) is generated instead.
+    """
     if source.allowlist and name not in source.allowlist:
         raise InvalidInputError(f"'{name}' is not in the allowlist of '{source.id}'")
+    if source.type is SourceType.MCP_REGISTRY:
+        return fetch_server(
+            source, name, item_id or mcp_registry.default_item_id(name), tmp
+        )
     commit = checkout_source(ctx, source, tmp / "src")
     offered = {p.name: p for p in sources.list_plugins(source, tmp / "src")}
     plugin = offered.get(name)
@@ -350,9 +386,12 @@ def make_candidate(
             source = get_source(staged, existing.source)
             name = existing.upstream_plugin or item_id
         with tempfile.TemporaryDirectory(prefix="skill-dojo-up-") as tmp:
-            fetched = fetch_plugin(ctx, source, name, Path(tmp))
+            fetched = fetch_plugin(ctx, source, name, Path(tmp), item_id)
             old = staged.lock.items.get(item_id)
-            if old is not None and old.upstream.commit == fetched.commit:
+            same_pin = old is not None and old.upstream.commit == fetched.commit
+            # A new MCP Registry version may keep the package pin but change
+            # arguments or env vars: then the built tree decides.
+            if same_pin and old is not None and old.upstream.ref == fetched.ref:
                 return CandidateResult(
                     item=item_id, commit=fetched.commit, branch="", status="up-to-date"
                 )
@@ -362,8 +401,9 @@ def make_candidate(
                     item=item_id, commit=fetched.commit, branch="", status="unchanged"
                 )
             branch = candidate_branch(item_id, fetched.commit)
-            commit_and_push(wt, branch, f"candidate: {item_id} {fetched.commit[:12]}")
-    title = f"candidate: {item_id} @ {fetched.commit[:12]}"
+            message = f"candidate: {item_id} {short_pin(fetched.commit)}"
+            commit_and_push(wt, branch, message)
+    title = f"candidate: {item_id} @ {short_pin(fetched.commit)}"
     pr, status = publish(
         ctx, item_id, branch=branch, base=base, title=title, body=built.body
     )
@@ -445,6 +485,8 @@ def mirror(
     the candidate branch.
     """
     source = get_source(Registry.load(ctx.repo), source_id)
+    if item_id is None and source.type is SourceType.MCP_REGISTRY:
+        item_id = mcp_registry.default_item_id(plugin)
     return make_candidate(ctx, source, plugin, item_id or plugin, new=True)
 
 

@@ -4,6 +4,8 @@ Every branch the tool pushes is built in a detached worktree, so the admin's
 checkout is never switched or touched.
 """
 
+import hashlib
+import re
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -20,7 +22,18 @@ CANDIDATE = "candidate/"
 QUARANTINE = "quarantine/"
 
 
+HEX_RE = re.compile(r"^[0-9a-f]*$")
+
+
+def short_pin(pin: str) -> str:
+    """A git commit cut to 12 characters; other pins (package versions) whole."""
+    return pin[:12] if HEX_RE.match(pin) else pin
+
+
 def candidate_branch(item_id: str, digest: str) -> str:
+    """``candidate/<item>/<12 hex>``; a pin that is not a commit is hashed."""
+    if not HEX_RE.match(digest):
+        digest = hashlib.sha256(digest.encode()).hexdigest()
     return f"{CANDIDATE}{item_id}/{digest[:12]}"
 
 

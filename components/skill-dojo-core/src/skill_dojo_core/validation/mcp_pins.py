@@ -11,6 +11,29 @@ UV_VALUE_FLAGS = frozenset(
     {"--from", "--with", "-p", "--python", "--index", "--with-requirements"}
 )
 CONTAINER_RUNNERS = frozenset({"docker", "podman"})
+# Runner options that fetch the package from somewhere else than its registry.
+INDEX_FLAGS = (
+    "--registry",
+    "--index",
+    "--index-url",
+    "--default-index",
+    "--extra-index-url",
+    "--find-links",
+    "-i",
+    "-f",
+)
+# ``docker run`` options that take a value, so the image is the next positional.
+CONTAINER_VALUE_FLAGS = frozenset(
+    {
+        "-e", "--env", "--env-file", "-v", "--volume", "--mount", "-p", "--publish",
+        "--name", "--network", "--net", "-w", "--workdir", "-u", "--user",
+        "--entrypoint", "-l", "--label", "--add-host", "--platform", "--pull",
+        "--cpus", "-m", "--memory", "--device", "--cap-add", "--cap-drop",
+        "--security-opt", "--tmpfs", "-h", "--hostname", "--ulimit", "--restart",
+        "--log-driver", "--log-opt", "--gpus", "--ipc", "--pid", "--runtime",
+        "--shm-size", "--group-add", "--dns", "--expose", "--label-file",
+    }
+)  # fmt: skip
 
 
 def npm_version(spec: str) -> str | None:
@@ -45,6 +68,21 @@ def _first_positional(args: list[str], value_flags: frozenset[str]) -> str | Non
     return None
 
 
+def _index_override(args: list[str], value_flags: frozenset[str]) -> bool:
+    """Whether a runner option before the package points at another index."""
+    package = _first_positional(args, value_flags)
+    runner_args = args[: args.index(package)] if package in args else args
+    return any(
+        a == f or a.startswith(f + "=") for a in runner_args for f in INDEX_FLAGS
+    )
+
+
+def _image(args: list[str]) -> str | None:
+    """The image of ``docker run …``: the first positional after ``run``."""
+    rest = args[args.index("run") + 1 :]
+    return _first_positional(rest, CONTAINER_VALUE_FLAGS)
+
+
 def _flag_values(args: list[str], flags: set[str]) -> list[str]:
     values = []
     for i, arg in enumerate(args):
@@ -72,6 +110,8 @@ def floating_reference(server: dict[str, Any]) -> str | None:
         return None
     runner = PurePosixPath(command).name
     if runner in NPM_RUNNERS:
+        if _index_override(args, NPM_VALUE_FLAGS):
+            return "package comes from another registry"
         packages = _flag_values(args, {"-p", "--package"}) or [
             _first_positional(args, NPM_VALUE_FLAGS) or ""
         ]
@@ -85,6 +125,8 @@ def floating_reference(server: dict[str, Any]) -> str | None:
         or (runner == "uv" and args[:2] == ["tool", "run"])
     ):
         rest = args[2:] if runner == "uv" else args[1:] if runner == "pipx" else args
+        if _index_override(rest, UV_VALUE_FLAGS):
+            return "package comes from another index"
         packages = _flag_values(rest, {"--from", "--with"})
         if not _flag_values(rest, {"--from"}):
             packages.insert(0, _first_positional(rest, UV_VALUE_FLAGS) or "")
@@ -92,10 +134,8 @@ def floating_reference(server: dict[str, Any]) -> str | None:
             if problem := _unpinned(spec, python_version(spec)):
                 return problem
         return None
-    if (
-        runner in CONTAINER_RUNNERS
-        and "run" in args
-        and not any("@sha256:" in a for a in args)
-    ):
-        return "container image is not pinned by digest"
+    if runner in CONTAINER_RUNNERS and "run" in args:
+        image = _image(args)
+        if image is None or "@sha256:" not in image:
+            return "container image is not pinned by digest"
     return None

@@ -44,6 +44,7 @@ CLAUDE_MCP = ".mcp.json"
 OPENAI = "com.openai"
 MAX_SHORT = 64
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 
 
 def plugin_dir(item_id: str) -> str:
@@ -252,6 +253,8 @@ class PluginBuild:
         text = self.overlay.read_text(self.rel(source)) or ""
         if other == ROOT_MANIFEST:
             text = with_schema(text)
+        elif other == ROOT_MCP:
+            text = with_schema(text, MCP_SCHEMA)
         self.write(other, text)
 
     def mcp(self) -> None:
@@ -401,15 +404,15 @@ class PluginBuild:
             self.copy_icon(f"skills/{name}/assets/{PurePosixPath(icon).name}")
 
 
-def with_schema(text: str) -> str:
-    """An Agent Plugins manifest needs ``$schema``; add it first when missing."""
+def with_schema(text: str, schema: str = PLUGIN_SCHEMA) -> str:
+    """An Agent Plugins file needs ``$schema``; add it first when missing."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
         return text
     if not isinstance(data, dict) or "$schema" in data:
         return text
-    return jsontext.dump({"$schema": PLUGIN_SCHEMA, **data})
+    return jsontext.dump({"$schema": schema, **data})
 
 
 def quote(value: str) -> str:

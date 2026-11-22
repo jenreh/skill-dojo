@@ -4,7 +4,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from skill_dojo_core import git, sources
+from skill_dojo_core import git, mcp_registry, sources
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
 from skill_dojo_core.models import Source, SourceType
@@ -50,8 +50,16 @@ def source_add(
     marketplace_path: str | None = None,
     allowlist: list[str] | None = None,
 ) -> SourcesResult:
-    """Add an upstream source to ``registry/sources.yaml``."""
-    sources.repo_url(repository)
+    """Add an upstream source to ``registry/sources.yaml``.
+
+    An MCP Registry source takes the registry's base URL as ``repository``.
+    """
+    if kind is SourceType.MCP_REGISTRY:
+        repository = mcp_registry.check_url(repository)
+        if marketplace_path is not None:
+            raise InvalidInputError("an MCP Registry source has no catalog path")
+    else:
+        sources.repo_url(repository)
     if marketplace_path is not None:
         sources.safe_path(marketplace_path)
     with repo_lock(ctx.repo):
@@ -108,10 +116,25 @@ def checkout_source(ctx: Context, source: Source, dest: Path) -> str:
     return commit
 
 
-def browse(ctx: Context, source_id: str) -> BrowseResult:
-    """List the plugins a source offers at its current ref."""
+def browse_servers(source: Source, search: str | None) -> BrowseResult:
+    """The servers an MCP Registry offers, at their latest version."""
+    offered = [
+        mcp_registry.offered(entry, source.repository)
+        for entry in mcp_registry.list_servers(source.repository, search)
+        if not source.allowlist or entry.name in source.allowlist
+    ]
+    return BrowseResult(source=source.id, commit="latest", plugins=offered)
+
+
+def browse(ctx: Context, source_id: str, *, search: str | None = None) -> BrowseResult:
+    """List the plugins a source offers at its current ref.
+
+    ``search`` filters the servers of an MCP Registry by name.
+    """
     reg = Registry.load(ctx.repo)
     source = get_source(reg, source_id)
+    if source.type is SourceType.MCP_REGISTRY:
+        return browse_servers(source, search)
     with tempfile.TemporaryDirectory(prefix="skill-dojo-") as tmp:
         commit = checkout_source(ctx, source, Path(tmp) / "src")
         plugins = sources.list_plugins(source, Path(tmp) / "src")

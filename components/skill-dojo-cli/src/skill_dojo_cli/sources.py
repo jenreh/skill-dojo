@@ -15,7 +15,12 @@ source_app = typer.Typer(help="Manage upstream sources (registry/sources.yaml)."
 @source_app.command("add")
 def source_add(
     source_id: Annotated[str, typer.Argument(help="Id of the new source.")],
-    repository: Annotated[str, typer.Argument(help="owner/name or a git URL.")],
+    repository: Annotated[
+        str,
+        typer.Argument(
+            help="owner/name or a git URL; the base URL for --type mcp_registry."
+        ),
+    ],
     kind: Annotated[
         SourceType, typer.Option("--type", help="What the repository holds.")
     ] = SourceType.AGENT_PLUGINS_MARKETPLACE,
@@ -57,9 +62,14 @@ def source_remove(source_id: str) -> None:
     typer.echo(f"Removed source '{source_id}'.")
 
 
-def browse(source_id: str) -> None:
+def browse(
+    source_id: str,
+    search: Annotated[
+        str | None, typer.Option(help="MCP Registry: only servers matching this.")
+    ] = None,
+) -> None:
     """List what an upstream source offers."""
-    result = core.browse(build_context(Path.cwd()), source_id)
+    result = core.browse(build_context(Path.cwd()), source_id, search=search)
     typer.echo(f"{result.source} @ {result.commit}")
     for plugin in result.plugins:
         version = f" {plugin.version}" if plugin.version else ""

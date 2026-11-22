@@ -355,6 +355,13 @@ As built (phase 4 review):
 Done: e2e against a `pytest-httpserver` fake registry: wrapper plugin and bundle part both
 pinned; a new fixture version opens a candidate PR.
 
+As built: an MCP Registry source is `type: mcp_registry` with the base URL as
+`repository`. The wrapper is generated into the fetch folder and then goes through the
+normal mirror path (hash, flags, candidate PR, approvals). The pin is the upstream
+`commit` (`npm:pkg@1.2.3`, `pypi:pkg==1.2.3`, `oci:host/repo@sha256:…`); the candidate
+branch suffix is the sha256 of the pin. Bundle parts name the server:
+`mcp:io.github.acme/weather/mcp_server/weather`.
+
 ## Phase 6: Local web UI (`serve`, `[web]` extra)
 
 Package `skill-dojo-web`. Reflex + appkit-mantine (use `reflex-state-and-architecture`,

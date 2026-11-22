@@ -25,6 +25,8 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 ITEM_ID_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 DNS_LABEL_RE = re.compile(r"[^a-z0-9-]+")
 PART_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+MAX_SERVER_NAME = 200
+SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.-]*/[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
 class ItemKind(StrEnum):
@@ -221,13 +223,24 @@ def _relative_path(value: str) -> str:
 RelativePath = Annotated[str, AfterValidator(_relative_path)]
 
 
+def _plugin_ref(value: str) -> str:
+    """A plugin name, or an MCP Registry server name (``io.github.acme/x``)."""
+    if (
+        SERVER_NAME_RE.match(value)
+        and ".." not in value
+        and len(value) <= MAX_SERVER_NAME
+    ):
+        return value
+    return _item_id(value)
+
+
 class Part(YamlModel):
     """One skill, agent or MCP server inside a bundle."""
 
     kind: Literal["skill", "agent", "mcp_server"]
     name: Annotated[str, AfterValidator(_part_name)]
     source: ItemId | None = None
-    upstream_plugin: ItemId | None = None
+    upstream_plugin: Annotated[str, AfterValidator(_plugin_ref)] | None = None
     ref: str | None = None
     commit: str | None = None
 
