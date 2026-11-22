@@ -15,7 +15,6 @@ def prov(**extra: object) -> metadata.Provenance:
         upstream_marketplace="openai/community-plugins",
         upstream_commit="8f2c1a9",
         source_path="plugins/x/skills/greet",
-        supported_channels=["beta", "stable"],
         **extra,  # ty: ignore[invalid-argument-type]
     )
 
@@ -35,7 +34,6 @@ def test_skill_metadata_is_flat_prefixed_strings() -> None:
         "acme.registry/source-marketplace": "openai/community-plugins",
         "acme.registry/source-commit": "8f2c1a9",
         "acme.registry/source-path": "plugins/x/skills/greet",
-        "acme.registry/supported-channels": "beta,stable",
         "acme.registry/deprecation-replacement": "acme:new",
     }
     assert all(isinstance(v, str) for v in data.values())
@@ -52,7 +50,6 @@ def test_plugin_extension_is_camel_case_with_lists() -> None:
         "kind": "mirror",
         "upstreamMarketplace": "openai/community-plugins",
         "upstreamCommit": "8f2c1a9",
-        "supportedChannels": ["beta", "stable"],
         "deprecation": {"replacement": "acme:new", "removalDate": "2027-01-01"},
         "parts": [{"name": "greet"}],
     }

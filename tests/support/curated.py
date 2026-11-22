@@ -22,7 +22,6 @@ def admin(
     git(clone, "add", "-A")
     git(clone, "commit", "-q", "-m", "init marketplace")
     git(clone, "push", "-q", "origin", "HEAD:main")
-    git(clone, "push", "-q", "origin", "HEAD:staging")
     return ctx
 
 

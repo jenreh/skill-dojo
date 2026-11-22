@@ -44,7 +44,7 @@ def test_load_defaults_for_optional_files(tmp_path: Path) -> None:
     assert reg.config.name == "acme"
     assert reg.items.items == []
     assert reg.lock.items == {}
-    assert reg.policy.reviewers[RiskTier.RESTRICTED] == 2
+    assert reg.policy.default_risk_tier is RiskTier.STANDARD
 
 
 def test_invalid_yaml_and_schema(tmp_path: Path) -> None:

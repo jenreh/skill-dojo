@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from skill_dojo_core.github import PullRequest, Review
+from skill_dojo_core.github import PullRequest
 
 MERGED_AT = "2026-11-21T11:00:00Z"
 
@@ -26,9 +26,7 @@ class FakeGitHub:
     remote: Path | None = None
     calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     pulls: list[PullRequest] = field(default_factory=list)
-    comments: dict[int, list[str]] = field(default_factory=dict)
-    review_log: dict[int, list[Review]] = field(default_factory=dict)
-    blocked: set[int] = field(default_factory=set)
+    releases: list[tuple[str, str, str]] = field(default_factory=list)
 
     def current_user(self) -> str:
         self.calls.append(("current_user", ()))
@@ -92,9 +90,6 @@ class FakeGitHub:
         self.calls.append(("update_pull_request", (number,)))
         return self._replace(pr)
 
-    def comment(self, number: int, body: str) -> None:
-        self.comments.setdefault(number, []).append(body)
-
     def get(self, number: int) -> PullRequest:
         return self._live(next(p for p in self.pulls if p.number == number))
 
@@ -123,36 +118,10 @@ class FakeGitHub:
         merged = [p for p in self.pulls if p.base == base and p.state == "MERGED"]
         return list(reversed(merged))
 
-    def close_pull_request(self, number: int, comment: str) -> None:
-        self.comment(number, comment)
-        self._replace(self.get(number).model_copy(update={"state": "CLOSED"}))
-
-    def reviews(self, number: int) -> list[Review]:
-        latest: dict[str, Review] = {}
-        for review in self.review_log.get(number, []):
-            latest[review.user] = review
-        return list(latest.values())
-
-    def add_review(self, number: int, user: str, state: str = "APPROVED") -> None:
-        self.review_log.setdefault(number, []).append(
-            Review(
-                user=user,
-                state=state,
-                submitted_at="2026-11-21T10:30:00Z",
-                commit=self.get(number).head_oid,
-            )
-        )
-
-    def approve(self, number: int, body: str) -> None:
-        self.calls.append(("approve", (number, body)))
-        self.add_review(number, self.user)
-
     def merge(
         self, number: int, head_oid: str | None = None, *, merged_by: str | None = None
     ) -> bool:
         self.calls.append(("merge", (number,)))
-        if number in self.blocked:
-            return False
         pr = self.get(number)
         assert pr.state == "OPEN", f"PR {number} is {pr.state}"
         assert head_oid is None or head_oid == pr.head_oid, "head moved"
@@ -185,10 +154,7 @@ class FakeGitHub:
         )
         return True
 
-    def merge_on_github(
-        self, number: int, reviewers: list[str], merged_by: str = "carol"
-    ) -> None:
-        """Someone reviews and merges on github.com, without the tool."""
-        for reviewer in reviewers:
-            self.add_review(number, reviewer)
-        assert self.merge(number, merged_by=merged_by)
+    def create_release(self, tag: str, title: str, notes: str) -> str:
+        self.calls.append(("create_release", (tag,)))
+        self.releases.append((tag, title, notes))
+        return f"https://github.invalid/acme/marketplace/releases/tag/{tag}"

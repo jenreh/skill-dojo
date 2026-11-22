@@ -1,4 +1,4 @@
-"""Audit: a timeline built from merged PRs, candidate PRs and release tags."""
+"""Audit: a timeline built from work-branch commits on main, merged PRs and tags."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,12 +10,11 @@ from skill_dojo_web.state import AppState
 
 KINDS = [
     ("all", "All"),
+    ("change", "Change"),
     ("sync", "Sync"),
-    ("approval", "Approval"),
-    ("promotion", "Promotion"),
+    ("merge", "Merge"),
     ("release", "Release"),
     ("revocation", "Revocation"),
-    ("quarantine", "Quarantine"),
 ]
 
 

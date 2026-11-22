@@ -1,6 +1,5 @@
-"""Releases: promote staging to main, then tag an immutable release."""
+"""Releases: what main has since the last tag, and the manual release."""
 
-import asyncio
 from typing import Any
 
 import reflex as rx
@@ -14,34 +13,28 @@ class ReleasesState(AppState):
     notes: str = ""
 
     @rx.var
-    def items(self) -> list[dict[str, Any]]:
-        return [
-            {
-                **i,
-                "change": f"{i['old_version']} → {i['new_version']}"
-                if i.get("old_version")
-                else f"new · {i.get('new_version') or ''}",
-                "who": " · ".join(
-                    x
-                    for x in (
-                        ("PR #" + i["pull_request"].rsplit("/", 1)[-1])
-                        if i.get("pull_request")
-                        else "",
-                        ", ".join(i.get("reviewers", [])),
-                    )
-                    if x
-                ),
-            }
-            for i in self.overview.get("items", [])
-        ]
-
-    @rx.var
-    def blocks(self) -> list[str]:
-        return list(self.overview.get("blocks", []))
+    def commits(self) -> list[dict[str, Any]]:
+        return list(self.overview.get("commits", []))
 
     @rx.var
     def tags(self) -> list[dict[str, Any]]:
         return list(self.overview.get("tags", []))
+
+    @rx.var
+    def untagged(self) -> bool:
+        return bool(self.overview.get("untagged", False))
+
+    @rx.var
+    def nothing_new(self) -> bool:
+        return not self.overview.get("untagged", False)
+
+    @rx.var
+    def latest(self) -> str:
+        return str(self.overview.get("latest_tag") or "no release yet")
+
+    @rx.var
+    def main_head(self) -> str:
+        return str(self.overview.get("main_head") or "")
 
     @rx.event
     def load(self) -> None:
@@ -56,38 +49,14 @@ class ReleasesState(AppState):
     def set_notes(self, value: str) -> None:
         self.notes = value
 
-    @rx.event(background=True)
-    async def promote(self) -> None:
-        """``promote`` in a worker thread; progress lines reach the header."""
-        async with self:
-            if self.busy:
-                return
-            self.busy, self.progress = True, "Promote started"
-        lines: list[str] = []
-        try:
-            ctx = self._ctx(lines.append)
-            task = asyncio.create_task(asyncio.to_thread(core.promote, ctx))
-            while not task.done():
-                await asyncio.sleep(0.3)
-                async with self:
-                    self.progress = lines[-1] if lines else self.progress
-            result = task.result()
-            url = result.pull_request.url if result.pull_request else ""
-            async with self:
-                self._say(f"Promote PR {result.status} {url}".strip())
-        except Exception as exc:  # noqa: BLE001 (shown in the UI)
-            async with self:
-                self._fail(exc)
-        finally:
-            async with self:
-                self.busy, self.progress = False, ""
-                self.load()
-
     @rx.event
-    def tag(self) -> None:
+    def create(self) -> None:
         try:
             result = core.release(self._ctx(), notes=self.notes)
-            self._say(f"Release {result.tag}: {result.status}")
+            if result.status == "created":
+                self._say(f"Released {result.tag}: {result.url or ''}".strip())
+            else:
+                self._say(f"Main has not changed since {result.tag}")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
         self.load()

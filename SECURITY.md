@@ -14,11 +14,15 @@ this repository, or contact the maintainers directly.
   and Dependabot keeps them current after a 7-day cooldown.
 - `git` and `gh` are always run with argument lists, never through a shell.
 - The web UI (`skill-dojo serve`) is local only and binds to `127.0.0.1`.
-- Approval facts come only from GitHub and git: approving reviews of the PR's final
-  head commit plus the person who merged, for PRs from this repository (never a
-  fork). `approvals.yaml` on staging is never trusted; promote reads main's copy.
-- `review approve --head <sha>` merges only while the PR still points at the commit
-  that was reviewed. Turn on "dismiss stale approvals" in branch protection too.
+- The approval is the merge of the one work-branch PR into `main`. skill-dojo never
+  merges and never pushes to `main`; branch protection with required reviews (and
+  "dismiss stale approvals") is the access control.
+- The work branch is never force-pushed. When the scheduled sync pushed meanwhile,
+  `finish` merges `origin/<work>` entry by entry and stops on a real conflict.
+- Commits of upstream content use `--no-verify`, so local git hooks never run on it.
+- The upstream cache (`.skill-dojo/cache/`) is only a speed-up: refs are resolved
+  against the remote every time, and a cached checkout is reused only when its
+  `HEAD` is exactly the pinned commit and its tree is unchanged.
 - The dev container only mounts this project.
 
 ## Repository baseline

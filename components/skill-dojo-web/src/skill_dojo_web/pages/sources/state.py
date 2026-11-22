@@ -1,4 +1,4 @@
-"""Sources and browse: upstream sources, what each offers, mirror or bundle."""
+"""Sources: upstream sources, their cached plugins, mirror or pick parts."""
 
 from typing import Any
 
@@ -9,6 +9,8 @@ from skill_dojo_core import SourceType
 from skill_dojo_web.state import AppState
 
 DETECT = "detect"
+NEW = "__new__"
+PART_LABEL = {"skill": "skill", "agent": "agent", "mcp_server": "MCP", "hook": "hook"}
 TYPE_LABEL = {
     "agent_plugins_marketplace": "agent plugins",
     "claude_marketplace": "claude",
@@ -36,6 +38,33 @@ class SourcesState(AppState):
     new_id: str = ""
     new_repo: str = ""
     new_type: str = DETECT
+    cached: bool = False
+    expanded: str = ""
+    part_rows: list[dict[str, Any]] = []
+    picked: list[str] = []
+    dialog: bool = False
+    local_plugins: list[str] = []
+    target: str = NEW
+    target_name: str = ""
+
+    @rx.var
+    def target_options(self) -> list[dict[str, str]]:
+        return [
+            {"value": NEW, "label": "New plugin"},
+            *({"value": p, "label": p} for p in self.local_plugins),
+        ]
+
+    @rx.var
+    def creating(self) -> bool:
+        return self.target == NEW
+
+    @rx.var
+    def picked_count(self) -> int:
+        return len(self.picked)
+
+    @rx.var
+    def cannot_add(self) -> bool:
+        return not self.picked or (self.target == NEW and not self.target_name.strip())
 
     @rx.var
     def source(self) -> dict[str, Any]:
@@ -76,15 +105,18 @@ class SourcesState(AppState):
         if ids:
             self._browse(self.selected if self.selected in ids else ids[0])
 
-    def _browse(self, source_id: str) -> None:
+    def _browse(self, source_id: str, refresh: bool = False) -> None:
+        if source_id != self.selected:
+            self.expanded, self.part_rows, self.picked = "", [], []
         self.selected, self.focus = source_id, ""
         try:
-            result = core.browse(self._ctx(), source_id)
+            result = core.browse(self._ctx(), source_id, refresh=refresh)
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self.plugins = []
             self._fail(exc)
             return
         self.commit = result.commit[:7]
+        self.cached = result.cached
         self.plugins = [
             {
                 "name": p.name,
@@ -95,6 +127,7 @@ class SourcesState(AppState):
                 "allowed": p.allowed,
                 "unsupported": p.unsupported or "",
                 "tracked": result.tracked.get(p.name, ""),
+                "indexed": p.name in result.parts,
             }
             for p in result.plugins
         ]
@@ -105,6 +138,68 @@ class SourcesState(AppState):
 
     @rx.event
     def refresh(self) -> None:
+        self._browse(self.selected, refresh=True)
+
+    @rx.event
+    def expand(self, plugin: str) -> None:
+        """Show (or hide) the skills, agents, MCP servers and hooks of a plugin."""
+        if self.expanded == plugin:
+            self.expanded, self.part_rows = "", []
+            return
+        try:
+            found = core.plugin_parts(self._ctx(), self.selected, plugin).parts
+        except Exception as exc:  # noqa: BLE001 (shown in the UI)
+            self._fail(exc)
+            return
+        self.expanded = plugin
+        self.part_rows = [
+            {
+                "spec": p.spec,
+                "name": p.name,
+                "kind": PART_LABEL.get(p.kind, p.kind),
+            }
+            for p in found
+        ]
+
+    @rx.event
+    def toggle_pick(self, spec: str) -> None:
+        self.picked = (
+            [s for s in self.picked if s != spec]
+            if spec in self.picked
+            else [*self.picked, spec]
+        )
+
+    @rx.event
+    def open_dialog(self) -> None:
+        try:
+            self.local_plugins = core.plugins_overview(self._ctx()).local
+        except Exception as exc:  # noqa: BLE001 (shown in the UI)
+            self._fail(exc)
+            return
+        self.dialog = True
+
+    @rx.event
+    def close_dialog(self) -> None:
+        self.dialog = False
+
+    @rx.event
+    def set_target(self, value: str) -> None:
+        self.target = value or NEW
+
+    @rx.event
+    def set_target_name(self, value: str) -> None:
+        self.target_name = value
+
+    @rx.event
+    def add_to_plugin(self) -> None:
+        create = self.target == NEW
+        name = self.target_name.strip() if create else self.target
+        try:
+            result = core.add_parts(self._ctx(), name, self.picked, create=create)
+            self._say(f"{result.item}: {result.status} with {len(self.picked)} part(s)")
+            self.picked, self.dialog, self.target_name = [], False, ""
+        except Exception as exc:  # noqa: BLE001 (shown in the UI)
+            self._fail(exc)
         self._browse(self.selected)
 
     @rx.event
@@ -159,7 +254,7 @@ class SourcesState(AppState):
     def mirror(self, plugin: str) -> None:
         try:
             result = core.mirror(self._ctx(), self.selected, plugin)
-            self._say(f"{result.item}: {result.status} candidate PR")
+            self._say(f"{result.item}: {result.status} on the work branch")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
         self._browse(self.selected)

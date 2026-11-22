@@ -1,4 +1,4 @@
-"""What the selected source offers: filters, the plugin table, the mirror note."""
+"""What the selected source offers: filters, plugins, their parts, add to plugin."""
 
 import appkit_mantine as mn
 import reflex as rx
@@ -34,27 +34,61 @@ def _status(p: rx.Var) -> rx.Component:
 
 def _actions(p: rx.Var) -> rx.Component:
     name = p["name"].to(str)
-    addable = (p["tracked"].to(str) == "") & (p["unsupported"].to(str) == "")
+    addable = p["unsupported"].to(str) == ""
     return rx.cond(
         p["allowed"].to(bool),
-        rx.cond(
-            addable,
-            mn.group(
-                mn.button("Mirror", size="xs", on_click=S.mirror(name)),
+        mn.group(
+            rx.cond(
+                addable & (p["tracked"].to(str) == ""),
+                mn.button("Mirror whole plugin", size="xs", on_click=S.mirror(name)),
+            ),
+            rx.cond(
+                addable,
                 mn.button(
-                    "Add to bundle",
+                    rx.cond(S.expanded == name, "Hide parts", "Pick parts"),
                     size="xs",
                     variant="default",
-                    on_click=rx.redirect(f"/bundles?source={S.selected}&plugin={name}"),
+                    on_click=S.expand(name),
                 ),
-                gap=6,
-                justify="flex-end",
             ),
-            mn.button(
-                "Details", size="xs", variant="subtle", on_click=S.set_focus(name)
-            ),
+            gap=6,
+            justify="flex-end",
         ),
         mn.button("Allow", size="xs", variant="subtle", on_click=S.allow(name)),
+    )
+
+
+def _part(part: rx.Var) -> rx.Component:
+    spec = part["spec"].to(str)
+    return mn.group(
+        mn.checkbox(
+            label=part["name"].to(str),
+            checked=S.picked.contains(spec),
+            on_change=lambda _: S.toggle_pick(spec),
+        ),
+        badge(part["kind"]),
+        gap="xs",
+    )
+
+
+def _parts(p: rx.Var) -> rx.Component:
+    return mn.table.tr(
+        mn.table.td(
+            mn.stack(
+                mn.group(
+                    rx.foreach(S.part_rows, _part),
+                    gap="lg",
+                    wrap="wrap",
+                ),
+                rx.cond(
+                    S.part_rows.length() == 0,
+                    mn.text("This plugin has no parts to pick.", size="xs", c="dimmed"),
+                ),
+                gap="xs",
+                py="xs",
+            ),
+            col_span=6,
+        ),
     )
 
 
@@ -79,14 +113,18 @@ def _row(p: rx.Var) -> rx.Component:
     )
 
 
+def _rows(p: rx.Var) -> rx.Component:
+    return rx.fragment(_row(p), rx.cond(S.expanded == p["name"].to(str), _parts(p)))
+
+
 def _note() -> rx.Component:
     return mn.alert(
         mn.group(
             mn.text(
                 "Mirror pins ",
                 mono(S.focus),
-                " at the source's current commit and opens a candidate PR into "
-                "staging. Nothing ships until it is approved and promoted.",
+                " at the source's current commit as a commit on the work branch. "
+                "Nothing ships until the work-branch PR is merged and released.",
                 size="sm",
                 flex="1 1 300px",
             ),
@@ -108,6 +146,7 @@ def catalog() -> rx.Component:
                 mn.group(
                     mn.title(S.selected, order=2, size="h3"),
                     badge(f"{S.plugins.length()} plugins"),
+                    rx.cond(S.cached, badge(f"cached @ {S.commit}", "info")),
                     gap="xs",
                 ),
                 gap=4,
@@ -151,13 +190,66 @@ def catalog() -> rx.Component:
                             mn.table.th(mn.visually_hidden("Actions")),
                         )
                     ),
-                    mn.table.tbody(rx.foreach(S.shown, _row)),
+                    mn.table.tbody(rx.foreach(S.shown, _rows)),
                     highlight_on_hover=True,
                     vertical_spacing="sm",
                 ),
                 min_width=720,
             ),
         ),
+        rx.cond(S.picked_count > 0, _picked_bar()),
         rx.cond(S.focus != "", _note()),
+        _dialog(),
         gap="md",
+    )
+
+
+def _picked_bar() -> rx.Component:
+    return mn.alert(
+        mn.group(
+            mn.text(f"{S.picked_count} part(s) picked", size="sm", flex="1"),
+            mn.button("Add to plugin", size="xs", on_click=S.open_dialog),
+            wrap="nowrap",
+        ),
+        color="blue",
+        variant="light",
+    )
+
+
+def _dialog() -> rx.Component:
+    return mn.modal(
+        mn.stack(
+            mn.text(
+                f"Copies {S.picked_count} pinned part(s) into a local plugin, as a "
+                "commit on the work branch.",
+                size="sm",
+                c="dimmed",
+            ),
+            mn.select(
+                label="Plugin",
+                data=S.target_options,
+                value=S.target,
+                on_change=S.set_target,
+                allow_deselect=False,
+            ),
+            rx.cond(
+                S.creating,
+                mn.text_input(
+                    label="New plugin name",
+                    placeholder="team-kit",
+                    value=S.target_name,
+                    on_change=S.set_target_name,
+                ),
+            ),
+            mn.group(
+                mn.button("Cancel", variant="default", on_click=S.close_dialog),
+                mn.button("Add parts", disabled=S.cannot_add, on_click=S.add_to_plugin),
+                justify="flex-end",
+            ),
+            gap="sm",
+        ),
+        title="Add to plugin",
+        opened=S.dialog,
+        on_close=S.close_dialog,
+        centered=True,
     )

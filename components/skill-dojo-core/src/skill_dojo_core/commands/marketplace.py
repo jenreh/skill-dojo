@@ -1,4 +1,5 @@
-"""``vendor``: copy a curated marketplace into a consumer repo (git subtree).
+"""``marketplace add|update``: copy a curated marketplace into a consumer repo
+(git subtree).
 
 Port of ``add-skills.sh`` from jenreh/agent-skills. Produces::
 
@@ -22,7 +23,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 URL_RE = re.compile(r"^(?:https://|ssh://|file://|git@[A-Za-z0-9.-]+:)[^\s]+$")
 
 
-class VendorResult(Result):
+class MarketplaceResult(Result):
     prefix: str
     ref: str
     updated: bool
@@ -40,14 +41,28 @@ def _links(name: str) -> dict[str, str]:
     }
 
 
-def vendor(
+def marketplace_add(
+    ctx: Context, url: str, *, ref: str = "main", name: str | None = None
+) -> MarketplaceResult:
+    """Add the marketplace subtree and its skill links to this consumer repo."""
+    return _subtree(ctx, url, ref=ref, name=name, update=False)
+
+
+def marketplace_update(
+    ctx: Context, url: str, *, ref: str = "main", name: str | None = None
+) -> MarketplaceResult:
+    """Pull the marketplace subtree again, at ``ref`` (e.g. a newer release tag)."""
+    return _subtree(ctx, url, ref=ref, name=name, update=True)
+
+
+def _subtree(
     ctx: Context,
     url: str,
     *,
-    ref: str = "main",
-    name: str | None = None,
-    update: bool = False,
-) -> VendorResult:
+    ref: str,
+    name: str | None,
+    update: bool,
+) -> MarketplaceResult:
     """Add (or with ``update`` pull) the marketplace subtree and its links."""
     if not URL_RE.match(url):
         raise InvalidInputError(
@@ -64,9 +79,9 @@ def vendor(
         raise ConflictError("working tree is dirty; commit or stash first")
     exists = (repo / prefix).exists()
     if exists and not update:
-        raise ConflictError(f"{prefix} exists; use --update to pull a new ref")
+        raise ConflictError(f"{prefix} exists; use 'marketplace update'")
     if update and not exists:
-        raise ConflictError(f"{prefix} does not exist; vendor it first")
+        raise ConflictError(f"{prefix} does not exist; use 'marketplace add'")
     links = _links(name)
     for link, target in links.items():
         path = repo / link
@@ -84,7 +99,7 @@ def vendor(
         ref,
         "--squash",
         "-m",
-        f"chore: vendor {name} at {ref}",
+        f"chore: marketplace {name} at {ref}",
     )
     created = []
     for link, target in links.items():
@@ -97,6 +112,6 @@ def vendor(
     if created:
         git.run(repo, "add", "--", *created)
         git.run(repo, "commit", "-q", "-m", f"chore: link {name} skills for agents")
-    ctx.report(f"Vendored {name} at {ref}")
-    log.info("Vendored %s at %s", name, ref)
-    return VendorResult(prefix=prefix, ref=ref, updated=update, links=created)
+    ctx.report(f"Marketplace {name} at {ref}")
+    log.info("Marketplace %s at %s", name, ref)
+    return MarketplaceResult(prefix=prefix, ref=ref, updated=update, links=created)

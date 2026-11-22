@@ -127,6 +127,8 @@ def lock_refresh(ctx: Context, *, item: str | None = None) -> LockRefreshResult:
             exclude = set(old.generated) if old else set()
             new = _local_lock(reg, target, exclude, commit)
             new.generated = sorted(exclude)
+            if old is not None:
+                new.parts, new.version = old.parts, old.version
             if old is not None and old.tree_sha256 == new.tree_sha256:
                 unchanged.append(target.id)
                 continue

@@ -9,7 +9,7 @@ from skill_dojo_web.pages.sources.components.source_list import source_list
 from skill_dojo_web.pages.sources.state import SourcesState
 
 ROUTE = "/sources"
-TITLE = "Sources and browse"
+TITLE = "Sources"
 ON_LOAD = SourcesState.load
 
 

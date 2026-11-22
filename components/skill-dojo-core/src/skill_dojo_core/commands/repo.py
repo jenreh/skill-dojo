@@ -7,7 +7,6 @@ from skill_dojo_core import builder, registry, workflows
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError
 from skill_dojo_core.models import (
-    ApprovalsFile,
     ChannelPolicy,
     ClientsFile,
     ItemsFile,
@@ -56,7 +55,6 @@ def scaffold(repo: Path, config: RegistryConfig) -> list[str]:
         registry.CONFIG: config,
         registry.SOURCES: SourcesFile(),
         registry.ITEMS: ItemsFile(),
-        registry.APPROVALS: ApprovalsFile(),
         registry.POLICY: ChannelPolicy(),
         registry.CLIENTS: ClientsFile(),
     }
@@ -69,7 +67,9 @@ def scaffold(repo: Path, config: RegistryConfig) -> list[str]:
     created.append(f"registry/{registry.LOCK}")
     workflow = repo / workflows.VALIDATE_WORKFLOW
     workflow.parent.mkdir(parents=True, exist_ok=True)
-    workflow.write_text(workflows.validate_workflow(config.tool), encoding="utf-8")
+    workflow.write_text(
+        workflows.validate_workflow(config.tool, config.main_branch), encoding="utf-8"
+    )
     created.append(workflows.VALIDATE_WORKFLOW)
     if _ensure_gitignore(repo):
         created.append(".gitignore")

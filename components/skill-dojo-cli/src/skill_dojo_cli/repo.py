@@ -1,4 +1,5 @@
-"""Repo-wide commands: ``init``, ``build``, ``validate``, ``flags``, ``vendor``."""
+"""Repo-wide commands: ``init``, ``build``, ``validate``, ``flags`` and the
+consumer-side ``marketplace add|update``."""
 
 from importlib.metadata import version
 from pathlib import Path
@@ -80,27 +81,48 @@ def validate() -> None:
 
 def flags(
     base: Annotated[
-        str, typer.Option(help="Compare against this ref.")
-    ] = "origin/staging",
+        str | None, typer.Option(help="Compare against this ref (default origin/main).")
+    ] = None,
 ) -> None:
     """Print the risk flags (markdown) of the working tree against a base ref."""
     typer.echo(core.flags(build_context(Path.cwd()), base=base).markdown)
 
 
-def vendor(
-    marketplace: Annotated[str, typer.Argument(help="Marketplace git URL.")],
-    ref: Annotated[
-        str, typer.Option(help="Branch or release tag, e.g. marketplace-v2026.11.21.")
-    ] = "main",
-    name: Annotated[
-        str | None, typer.Option(help="Folder under .agents/ (default: repo name).")
-    ] = None,
-    update: Annotated[bool, typer.Option(help="Pull the subtree again.")] = False,
-) -> None:
-    """Vendor a marketplace's skills into this (consumer) repo."""
-    result = core.vendor(
-        build_context(Path.cwd()), marketplace, ref=ref, name=name, update=update
-    )
-    verb = "Updated" if result.updated else "Vendored"
+marketplace_app = typer.Typer(
+    help="Use a curated marketplace in this (consumer) repo: a git subtree in "
+    ".agents/<name> plus skill links for Codex, Copilot and Claude Code."
+)
+
+UrlArgument = Annotated[str, typer.Argument(help="Marketplace git URL.")]
+RefOption = Annotated[
+    str, typer.Option(help="Branch or release tag, e.g. marketplace-v2026.11.21.")
+]
+NameOption = Annotated[
+    str | None, typer.Option(help="Folder under .agents/ (default: repo name).")
+]
+
+
+def _echo_marketplace(result: core.MarketplaceResult) -> None:
+    verb = "Updated" if result.updated else "Added"
     typer.echo(f"{verb} {result.prefix} at {result.ref}.")
     echo_lines(result.links)
+
+
+@marketplace_app.command("add")
+def marketplace_add(
+    url: UrlArgument, ref: RefOption = "main", name: NameOption = None
+) -> None:
+    """Add a curated marketplace's skills to this repo."""
+    _echo_marketplace(
+        core.marketplace_add(build_context(Path.cwd()), url, ref=ref, name=name)
+    )
+
+
+@marketplace_app.command("update")
+def marketplace_update(
+    url: UrlArgument, ref: RefOption = "main", name: NameOption = None
+) -> None:
+    """Pull the marketplace again, e.g. at a newer release tag."""
+    _echo_marketplace(
+        core.marketplace_update(build_context(Path.cwd()), url, ref=ref, name=name)
+    )

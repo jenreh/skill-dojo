@@ -35,7 +35,7 @@ def source_add(
         list[str] | None, typer.Option(help="Only offer these plugins (repeatable).")
     ] = None,
 ) -> None:
-    """Add an upstream source."""
+    """Add an upstream source (a commit on the work branch) and cache it."""
     core.source_add(
         build_context(Path.cwd()),
         source_id,
@@ -58,6 +58,24 @@ def source_list() -> None:
         )
 
 
+@source_app.command("refresh")
+def source_refresh(
+    source_id: Annotated[
+        str | None, typer.Argument(help="Only this source (default: all).")
+    ] = None,
+) -> None:
+    """Fetch the cached catalogs again."""
+    core.source_refresh(build_context(Path.cwd()), source_id)
+    typer.echo(f"Refreshed {source_id or 'all sources'}.")
+
+
+@source_app.command("allow")
+def source_allow(source_id: str, plugin: str) -> None:
+    """Add a plugin to a source's allowlist."""
+    core.source_allow(build_context(Path.cwd()), source_id, plugin)
+    typer.echo(f"Allowed '{plugin}' from '{source_id}'.")
+
+
 @source_app.command("remove")
 def source_remove(source_id: str) -> None:
     """Remove an upstream source no item uses."""
@@ -70,10 +88,17 @@ def browse(
     search: Annotated[
         str | None, typer.Option(help="MCP Registry: only servers matching this.")
     ] = None,
+    refresh: Annotated[
+        bool, typer.Option(help="Fetch the source again instead of the cache.")
+    ] = False,
+    parts: Annotated[bool, typer.Option(help="Also list each plugin's parts.")] = False,
 ) -> None:
-    """List what an upstream source offers."""
-    result = core.browse(build_context(Path.cwd()), source_id, search=search)
-    typer.echo(f"{result.source} @ {result.commit}")
+    """List what an upstream source offers (from the local cache)."""
+    result = core.browse(
+        build_context(Path.cwd()), source_id, search=search, refresh=refresh
+    )
+    cached = " (cached)" if result.cached else ""
+    typer.echo(f"{result.source} @ {result.commit}{cached}")
     for plugin in result.plugins:
         version = f" {plugin.version}" if plugin.version else ""
         where = f" ({plugin.repository})" if plugin.repository != result.source else ""
@@ -83,3 +108,7 @@ def browse(
         if plugin.name in result.tracked:
             note += f"  [{result.tracked[plugin.name]}]"
         typer.echo(f"  {plugin.name}{version}  {plugin.path}{where}{note}")
+        if parts:
+            for part in result.parts.get(plugin.name, []):
+                spec = f"{result.source}:{plugin.name}/{part.kind}/{part.name}"
+                typer.echo(f"      {spec}")

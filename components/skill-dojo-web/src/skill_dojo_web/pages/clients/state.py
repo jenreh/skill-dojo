@@ -1,4 +1,4 @@
-"""Clients and revocation: who uses which ref, and the revoke PR."""
+"""Clients and revocation: who uses which ref, and revoking on the work branch."""
 
 from typing import Any
 
@@ -12,8 +12,7 @@ class ClientsState(AppState):
     clients: list[dict[str, Any]] = []
     targets: list[dict[str, Any]] = []
     item: str = ""
-    action: str = "rollback"
-    reason: str = ""
+    action: str = "remove"
     adding: bool = False
     name: str = ""
     ref: str = ""
@@ -68,10 +67,6 @@ class ClientsState(AppState):
         self.action = value
 
     @rx.event
-    def set_reason(self, value: str) -> None:
-        self.reason = value
-
-    @rx.event
     def toggle_add(self) -> None:
         self.adding = not self.adding
 
@@ -120,15 +115,12 @@ class ClientsState(AppState):
 
     @rx.event
     def revoke(self) -> None:
+        rollback = self.target.get("rollback_to") if self.action == "rollback" else None
         try:
-            result = core.revoke(
-                self._ctx(),
-                self.item,
-                rollback=self.action == "rollback",
-                reason=self.reason,
-            )
+            result = core.revoke(self._ctx(), self.item, to=rollback or None)
             self._say(
-                f"Revoke {result.item} ({result.action}): {result.pull_request.url}"
+                f"Revoked {result.item} ({result.action}) on the work branch; "
+                "finish it on the Changes page"
             )
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)

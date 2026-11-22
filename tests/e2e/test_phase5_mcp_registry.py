@@ -10,8 +10,8 @@ from skill_dojo_core import (
     Context,
     SourceType,
     ToolPin,
+    add_parts,
     browse,
-    bundle_create,
     init,
     mirror,
     source_add,
@@ -77,20 +77,16 @@ def admin(
     git(clone, "add", "-A")
     git(clone, "commit", "-q", "-m", "init marketplace")
     git(clone, "push", "-q", "origin", "HEAD:main")
-    git(clone, "push", "-q", "origin", "HEAD:staging")
     source_add(ctx, "mcp", registry.url, kind=SourceType.MCP_REGISTRY)
     return ctx
 
 
-def show(ctx: Context, ref: str, path: str) -> str:
-    git(ctx.repo, "fetch", "-q", "origin")
-    return git(ctx.repo, "show", f"{ref}:{path}")
+def read(ctx: Context, path: str) -> dict:
+    return json.loads((ctx.repo / path).read_text())
 
 
-def staged_lock(ctx: Context) -> LockFile:
-    return LockFile.model_validate_json(
-        show(ctx, "origin/staging", "registry/lock.json")
-    )
+def lock(ctx: Context) -> LockFile:
+    return LockFile.model_validate_json((ctx.repo / "registry/lock.json").read_text())
 
 
 def test_browse_lists_servers_and_what_cannot_be_pinned(admin: Context) -> None:
@@ -104,59 +100,52 @@ def test_browse_lists_servers_and_what_cannot_be_pinned(admin: Context) -> None:
 
 
 def test_wrapper_plugin_is_pinned_and_sync_follows_new_versions(
-    admin: Context, registry: FakeMcpRegistry, fake_github: FakeGitHub
+    admin: Context, registry: FakeMcpRegistry
 ) -> None:
     made = mirror(admin, "mcp", WEATHER)
     assert made.item == "weather"
-    assert made.status == "opened"
-    assert made.commit == "npm:@acme/weather-mcp@1.0.0"
-    assert made.branch.startswith("candidate/weather/")
+    assert made.status == "added"
+    assert made.pin == "npm:@acme/weather-mcp@1.0.0"
     assert {f.kind for f in made.flags} >= {"mcp-server-added"}
-    branch = f"origin/{made.branch}"
-    servers = json.loads(show(admin, branch, "plugins/weather/.mcp.json"))
+    servers = read(admin, "plugins/weather/.mcp.json")
     assert servers["mcpServers"]["weather"] == {
         "type": "stdio",
         "command": "npx",
         "args": ["-y", "@acme/weather-mcp@1.0.0", "--units", "metric", "${CITY}"],
         "env": {"WEATHER_API_KEY": "${WEATHER_API_KEY}"},
     }
-    manifest = json.loads(show(admin, branch, "plugins/weather/plugin.json"))
+    manifest = read(admin, "plugins/weather/plugin.json")
     assert manifest["name"] == "weather"
     assert manifest["version"] == "1.0.0"
     stamp = manifest["extensions"]["com.acme.registry"]
     assert stamp["upstreamCommit"] == "npm:@acme/weather-mcp@1.0.0"
     assert stamp["upstreamPlugin"] == WEATHER
-    assert made.pull_request is not None
-    assert "Validation errors" not in made.pull_request.body
-    assert fake_github.merge(made.pull_request.number)
 
-    lock = staged_lock(admin).items["weather"]
-    assert lock.upstream.commit == "npm:@acme/weather-mcp@1.0.0"
-    assert lock.upstream.ref == "1.0.0"
-    assert [c.status for c in sync(admin).candidates] == ["up-to-date"]
+    entry = lock(admin).items["weather"]
+    assert entry.upstream.commit == "npm:@acme/weather-mcp@1.0.0"
+    assert entry.upstream.ref == "1.0.0"
+    assert [c.status for c in sync(admin).changes] == ["up-to-date"]
 
     registry.publish(WEATHER, "1.1.0", [npm("@acme/weather-mcp", "1.1.0")])
-    (update,) = sync(admin).candidates
-    assert update.status == "opened"
-    assert update.commit == "npm:@acme/weather-mcp@1.1.0"
-    assert update.pull_request is not None
-    assert "was `npm:@acme/weather-mcp@1.0.0`" in update.pull_request.body
-    assert {f.kind for f in update.flags} >= {"mcp-server-changed"}
+    (update,) = sync(admin).changes
+    assert update.status == "updated"
+    assert update.pin == "npm:@acme/weather-mcp@1.1.0"
+    assert update.commit is not None
+    assert {f.kind for f in update.flags} >= {"mcp-server-added"}
+    assert read(admin, "plugins/weather/plugin.json")["version"] == "1.1.0"
 
 
 def test_pypi_and_oci_servers_pin_version_and_digest(
-    admin: Context, registry: FakeMcpRegistry, fake_github: FakeGitHub
+    admin: Context, registry: FakeMcpRegistry
 ) -> None:
     digest = registry.image("mcp/files:0.3.0", {"schemaVersion": 2, "manifests": []})
-    searched = mirror(admin, "mcp", SEARCH, item_id="acme-search")
-    servers = json.loads(
-        show(admin, f"origin/{searched.branch}", "plugins/acme-search/.mcp.json")
-    )
+    mirror(admin, "mcp", SEARCH, item_id="acme-search")
+    servers = read(admin, "plugins/acme-search/.mcp.json")
     assert servers["mcpServers"]["search"]["args"] == ["acme-search-mcp==2.0.0"]
 
-    kit = bundle_create(admin, "kit", [f"mcp:{FILES}/mcp_server/files"])
-    assert kit.status == "opened"
-    bundle = json.loads(show(admin, f"origin/{kit.branch}", "plugins/kit/mcp.json"))
+    kit = add_parts(admin, "kit", [f"mcp:{FILES}/mcp_server/files"], create=True)
+    assert kit.status == "created"
+    bundle = read(admin, "plugins/kit/.mcp.json")
     image = f"{registry.host}/mcp/files@{digest}"
     assert bundle["mcpServers"]["files"] == {
         "type": "stdio",
@@ -164,35 +153,28 @@ def test_pypi_and_oci_servers_pin_version_and_digest(
         "args": ["run", "-i", "--rm", "-e", "ROOT", image],
         "env": {"ROOT": "${ROOT}"},
     }
-    items = model_at(admin.repo, f"origin/{kit.branch}", ITEMS, ItemsFile)
+    items = model_at(admin.repo, "HEAD", ITEMS, ItemsFile)
     kit_item = items.get("kit")
     assert kit_item is not None
     (part,) = kit_item.parts
     assert (part.source, part.upstream_plugin) == ("mcp", FILES)
     assert part.commit == f"oci:{image}"
 
-    # A new registry version moves the bundle part through sync, too.
-    pull = kit.pull_request
-    assert pull is not None
-    assert fake_github.merge(pull.number)
+    # A new registry version moves the part through sync, too.
     newer = registry.image("mcp/files:0.4.0", {"schemaVersion": 2, "layers": []})
     registry.publish(
         FILES, "0.4.0", [oci(f"{registry.host}/mcp/files", version="0.4.0")]
     )
-    by_item = {c.item: c for c in sync(admin).candidates}
-    assert by_item["kit"].status == "opened"
-    bundle = json.loads(
-        show(admin, f"origin/{by_item['kit'].branch}", "plugins/kit/mcp.json")
-    )
+    by_item = {c.item: c for c in sync(admin).changes}
+    assert by_item["kit"].status == "updated"
+    bundle = read(admin, "plugins/kit/.mcp.json")
     assert f"{registry.host}/mcp/files@{newer}" in bundle["mcpServers"]["files"]["args"]
 
 
 def test_new_registry_version_with_the_same_package_pin(
-    admin: Context, registry: FakeMcpRegistry, fake_github: FakeGitHub
+    admin: Context, registry: FakeMcpRegistry
 ) -> None:
-    made = mirror(admin, "mcp", SEARCH)
-    assert made.pull_request is not None
-    assert fake_github.merge(made.pull_request.number)
+    mirror(admin, "mcp", SEARCH)
     # Same package version, new registry entry with an extra argument.
     registry.publish(
         SEARCH,
@@ -208,11 +190,9 @@ def test_new_registry_version_with_the_same_package_pin(
             )
         ],
     )
-    (update,) = sync(admin).candidates
-    assert update.status == "opened"
-    servers = json.loads(
-        show(admin, f"origin/{update.branch}", "plugins/search/.mcp.json")
-    )
+    (update,) = sync(admin).changes
+    assert update.status == "updated"
+    servers = read(admin, "plugins/search/.mcp.json")
     assert servers["mcpServers"]["search"]["args"] == [
         "acme-search-mcp==2.0.0",
         "--fast",

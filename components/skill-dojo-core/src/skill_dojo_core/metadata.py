@@ -51,14 +51,9 @@ class Provenance(BaseModel):
     upstream_license: str | None = None
     source_path: str | None = None
     source_digest: str | None = None
-    approved_version: str | None = None
-    approved_by: str | None = None
-    approved_at: str | None = None
     risk_tier: str | None = None
     data_classification: str | None = None
     allowed_tools: list[str] | None = None
-    review_evidence: str | None = None
-    supported_channels: list[str] | None = None
     deprecation_replacement: str | None = None
     deprecation_removal_date: str | None = None
     parts: list[dict[str, Any]] | None = None

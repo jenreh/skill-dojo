@@ -18,7 +18,8 @@ from ruamel.yaml.error import YAMLError
 from skill_dojo_core import git
 from skill_dojo_core.errors import InvalidInputError, NotFoundError
 from skill_dojo_core.models import (
-    ApprovalsFile,
+    LEGACY_KINDS,
+    LEGACY_POLICY_KEYS,
     ChannelPolicy,
     ClientsFile,
     ItemsFile,
@@ -31,7 +32,8 @@ REGISTRY_DIR = "registry"
 CONFIG = "config.yaml"
 SOURCES = "sources.yaml"
 ITEMS = "items.yaml"
-APPROVALS = "approvals.yaml"
+# Rev. 1 only: approvals now live in the merged PR; build removes the file.
+LEGACY_APPROVALS = "approvals.yaml"
 POLICY = "channel-policy.yaml"
 CLIENTS = "clients.yaml"
 LOCK = "lock.json"
@@ -126,6 +128,17 @@ def dump_yaml(data: Any) -> str:
     return out.getvalue()
 
 
+def yaml_text(
+    repo: Path, name: str, model: BaseModel, *, defaults: bool = False
+) -> tuple[str, str | None]:
+    """(new text, current text or None) of ``registry/<name>`` for ``model``."""
+    path = registry_path(repo, name)
+    new = _compact(model.model_dump(mode="json"), defaults=defaults)
+    before = path.read_text(encoding="utf-8") if path.is_file() else None
+    raw = _read_yaml(path) if before is not None else None
+    return dump_yaml(merge(raw, new) if raw is not None else new), before
+
+
 def save_yaml_model(
     repo: Path, name: str, model: BaseModel, *, defaults: bool = False
 ) -> bool:
@@ -134,16 +147,38 @@ def save_yaml_model(
     ``defaults=True`` also writes ``false`` and empty values, so a new file shows
     every option.
     """
-    path = registry_path(repo, name)
-    new = _compact(model.model_dump(mode="json"), defaults=defaults)
-    before = path.read_text(encoding="utf-8") if path.is_file() else None
-    raw = _read_yaml(path) if before is not None else None
-    text = dump_yaml(merge(raw, new) if raw is not None else new)
+    text, before = yaml_text(repo, name, model, defaults=defaults)
     if text == before:
         return False
+    path = registry_path(repo, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return True
+
+
+def _legacy_items(raw: Any) -> bool:
+    items = raw.get("items") if isinstance(raw, dict) else None
+    return isinstance(items, list) and any(
+        isinstance(i, dict)
+        and (i.get("kind") in LEGACY_KINDS or "supported_channels" in i)
+        for i in items
+    )
+
+
+def _legacy_policy(raw: Any) -> bool:
+    return isinstance(raw, dict) and bool(LEGACY_POLICY_KEYS & set(raw))
+
+
+def legacy_files(repo: Path) -> list[str]:
+    """The ``registry/`` files that still use the rev. 1 format."""
+    found = []
+    for name, check in ((ITEMS, _legacy_items), (POLICY, _legacy_policy)):
+        path = registry_path(repo, name)
+        if path.is_file() and check(_read_yaml(path)):
+            found.append(name)
+    if registry_path(repo, LEGACY_APPROVALS).is_file():
+        found.append(LEGACY_APPROVALS)
+    return found
 
 
 def model_at[M: BaseModel](repo: Path, ref: str, name: str, model: type[M]) -> M:
@@ -193,7 +228,6 @@ class Registry:
     config: RegistryConfig
     sources: SourcesFile
     items: ItemsFile
-    approvals: ApprovalsFile
     policy: ChannelPolicy
     clients: ClientsFile
     lock: LockFile
@@ -205,7 +239,6 @@ class Registry:
             config=load_yaml_model(repo, CONFIG, RegistryConfig, required=True),
             sources=load_yaml_model(repo, SOURCES, SourcesFile),
             items=load_yaml_model(repo, ITEMS, ItemsFile),
-            approvals=load_yaml_model(repo, APPROVALS, ApprovalsFile),
             policy=load_yaml_model(repo, POLICY, ChannelPolicy),
             clients=load_yaml_model(repo, CLIENTS, ClientsFile),
             lock=load_lock(repo),

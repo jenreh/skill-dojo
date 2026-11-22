@@ -11,8 +11,6 @@ import subprocess
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import Field
-
 from skill_dojo_core.errors import ExternalToolError
 from skill_dojo_core.results import Result
 
@@ -23,8 +21,6 @@ PR_FIELDS = (
     "headRefOid,isCrossRepository,createdAt"
 )
 MERGED_FIELDS = f"{PR_FIELDS},mergedAt,mergeCommit,mergedBy"
-# mergeStateStatus values where a merge waits for something a human must do.
-WAITING = frozenset({"BLOCKED", "BEHIND", "DRAFT", "UNSTABLE"})
 MERGED_LIMIT = "1000"
 
 
@@ -45,13 +41,6 @@ class PullRequest(Result):
     created_at: str | None = None
 
 
-class Review(Result):
-    user: str
-    state: str  # APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
-    submitted_at: str | None = None
-    commit: str | None = Field(default=None, description="Head commit reviewed")
-
-
 class GitHub(Protocol):
     def current_user(self) -> str:
         """Login of the authenticated user."""
@@ -70,11 +59,7 @@ class GitHub(Protocol):
         self, number: int, title: str, body: str
     ) -> PullRequest: ...
 
-    def comment(self, number: int, body: str) -> None: ...
-
     def list_open_pull_requests(self, base: str) -> list[PullRequest]: ...
-
-    def close_pull_request(self, number: int, comment: str) -> None: ...
 
     def get_pull_request(self, number: int) -> PullRequest: ...
 
@@ -82,18 +67,8 @@ class GitHub(Protocol):
         """Recently merged PRs into ``base`` (newest first)."""
         ...
 
-    def reviews(self, number: int) -> list[Review]:
-        """The latest review of each reviewer."""
-        ...
-
-    def approve(self, number: int, body: str) -> None:
-        """Submit an approving review."""
-        ...
-
-    def merge(self, number: int, head_oid: str | None = None) -> bool:
-        """Merge with a merge commit, only while the head is still ``head_oid``.
-        ``False`` when the PR waits for something (branch protection, checks);
-        never bypasses it."""
+    def create_release(self, tag: str, title: str, notes: str) -> str:
+        """A GitHub Release for the pushed ``tag``; returns its URL."""
         ...
 
 
@@ -199,9 +174,6 @@ class GhCli:
         self.run("pr", "edit", str(number), f"--title={title}", f"--body={body}")
         return self.view(str(number))
 
-    def comment(self, number: int, body: str) -> None:
-        self.run("pr", "comment", str(number), f"--body={body}")
-
     def list_open_pull_requests(self, base: str) -> list[PullRequest]:
         found = json.loads(
             self.run(
@@ -217,9 +189,6 @@ class GhCli:
             or "[]"
         )
         return [_pull_request(item) for item in found]
-
-    def close_pull_request(self, number: int, comment: str) -> None:
-        self.run("pr", "close", str(number), f"--comment={comment}")
 
     def get_pull_request(self, number: int) -> PullRequest:
         return self.view(str(number))
@@ -240,39 +209,13 @@ class GhCli:
         )
         return [_pull_request(item) for item in found]
 
-    def reviews(self, number: int) -> list[Review]:
-        data = json.loads(
-            self.run("pr", "view", str(number), "--json", "latestReviews") or "{}"
+    def create_release(self, tag: str, title: str, notes: str) -> str:
+        out = self.run(
+            "release",
+            "create",
+            tag,
+            "--verify-tag",
+            f"--title={title}",
+            f"--notes={notes}",
         )
-        return [
-            Review(
-                user=_login(r.get("author")) or "",
-                state=r.get("state") or "",
-                submitted_at=r.get("submittedAt"),
-                commit=(r.get("commit") or {}).get("oid"),
-            )
-            for r in data.get("latestReviews") or []
-        ]
-
-    def approve(self, number: int, body: str) -> None:
-        self.run("pr", "review", str(number), "--approve", f"--body={body}")
-
-    def merge_state(self, number: int) -> str | None:
-        return json.loads(
-            self.run("pr", "view", str(number), "--json", "mergeStateStatus") or "{}"
-        ).get("mergeStateStatus")
-
-    def merge(self, number: int, head_oid: str | None = None) -> bool:
-        state = self.merge_state(number)
-        if state in WAITING:
-            log.info("PR %d waits: %s", number, state)
-            return False
-        match = [f"--match-head-commit={head_oid}"] if head_oid else []
-        try:
-            self.run("pr", "merge", str(number), "--merge", *match)
-        except ExternalToolError:
-            # GitHub may compute the state only now (it was UNKNOWN).
-            if self.merge_state(number) in WAITING:
-                return False
-            raise
-        return True
+        return out.strip().splitlines()[-1] if out.strip() else ""

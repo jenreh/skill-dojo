@@ -10,9 +10,9 @@ from skill_dojo_web.state import AppState
 from skill_dojo_web.theme import WORDMARK
 
 PAGES = [
-    ("review", "/", "inbox", "Review queue"),
-    ("sources", "/sources", "database", "Sources and browse"),
-    ("bundles", "/bundles", "layers", "Bundles"),
+    ("changes", "/", "git-branch", "Changes"),
+    ("sources", "/sources", "database", "Sources"),
+    ("plugins", "/plugins", "layers", "Plugins"),
     ("preview", "/preview", "eye", "Marketplace preview"),
     ("releases", "/releases", "tag", "Releases"),
     ("clients", "/clients", "users", "Clients"),
@@ -117,7 +117,7 @@ def navbar(active: str) -> rx.Component:
                 AppState.queue_count > 0,
                 mn.badge(AppState.queue_count, size="sm", circle=True),
             )
-            if key == "review"
+            if key == "changes"
             else None,
             active=key == active,
             on_click=rx.redirect(route),

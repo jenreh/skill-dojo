@@ -1,4 +1,4 @@
-"""Revoke an item: action, reason, affected clients, the revocation PR."""
+"""Revoke an item: action, affected clients, a change on the work branch."""
 
 import appkit_mantine as mn
 import reflex as rx
@@ -7,9 +7,9 @@ from skill_dojo_web.components.common import panel
 from skill_dojo_web.pages.clients.state import ClientsState as S
 
 STEPS = (
-    "Hotfix PR straight to main",
-    "Back-merge PR into staging",
-    "Quarantine flag stops new candidates",
+    "A commit on the work branch removes or rolls back the item",
+    "A rollback sets the quarantine flag, so sync skips it",
+    "Finish and merge the PR to ship it",
 )
 
 
@@ -39,7 +39,7 @@ def revoke_panel() -> rx.Component:
                         "label": rx.cond(
                             target["rollback_to"].to(str) != "",
                             f"Roll back to {target['rollback_to']}",
-                            "Roll back (no earlier approved release)",
+                            "Roll back (no earlier release)",
                         ),
                     },
                     {"value": "remove", "label": "Remove from marketplace"},
@@ -48,19 +48,12 @@ def revoke_panel() -> rx.Component:
                 on_change=S.set_action,
                 allow_deselect=False,
             ),
-            mn.textarea(
-                label="Reason",
-                default_value=S.reason,
-                on_blur=S.set_reason,
-                autosize=True,
-                min_rows=3,
-            ),
             mn.paper(
                 mn.text(
                     f"{S.affected_names.length()} clients affected", fw=500, size="sm"
                 ),
                 mn.text(
-                    f"In {S.affected_refs}. Contacts are copied to the PR body.",
+                    f"In {S.affected_refs}. Tell them after the merge.",
                     size="xs",
                     c="dimmed",
                 ),
@@ -76,10 +69,11 @@ def revoke_panel() -> rx.Component:
                 size="xs",
             ),
             mn.button(
-                "Open revocation PR",
+                "Revoke on the work branch",
                 color="red",
                 variant="light",
-                disabled=S.item == "",
+                disabled=(S.item == "")
+                | ((S.action == "rollback") & (target["rollback_to"].to(str) == "")),
                 on_click=S.revoke,
             ),
             gap="sm",

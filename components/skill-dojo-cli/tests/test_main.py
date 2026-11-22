@@ -8,21 +8,25 @@ from skill_dojo_cli.main import app
 
 runner = CliRunner()
 
-GROUPS = ["source", "bundle", "local", "lock", "review", "clients"]
+GROUPS = ["source", "plugin", "local", "lock", "clients", "marketplace"]
 COMMANDS = [
     "init",
     "browse",
     "mirror",
+    "add-parts",
+    "remove-parts",
+    "version",
     "sync",
-    "promote",
+    "status",
+    "finish",
     "release",
     "revoke",
     "build",
     "validate",
     "flags",
-    "vendor",
     "serve",
 ]
+REMOVED = ["review", "promote", "bundle", "vendor"]
 
 
 def test_version() -> None:
@@ -48,3 +52,8 @@ def test_every_command_has_help(name: str) -> None:
 def test_verbose_enables_debug_logging() -> None:
     runner.invoke(app, ["-v", "clients", "list"])
     assert logging.getLogger().level == logging.DEBUG
+
+
+@pytest.mark.parametrize("name", REMOVED)
+def test_removed_commands_are_gone(name: str) -> None:
+    assert runner.invoke(app, [name, "--help"]).exit_code != 0
