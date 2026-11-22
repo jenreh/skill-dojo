@@ -15,9 +15,43 @@ def test_serve_without_web_extra_prints_install_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "skill_dojo_web", None)
+    monkeypatch.setattr("skill_dojo_cli.serve.shutil.which", lambda _: None)
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 2
     assert 'uv tool install "skill-dojo[web]"' in result.output
+
+
+def test_serve_without_web_extra_reruns_through_uv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setitem(sys.modules, "skill_dojo_web", None)
+    monkeypatch.delenv("SKILL_DOJO_WEB_REEXEC", raising=False)
+    monkeypatch.setattr("skill_dojo_cli.serve.shutil.which", lambda _: "/bin/uv")
+    seen: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> types.SimpleNamespace:
+        seen.append(command)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("skill_dojo_cli.serve.subprocess.run", fake_run)
+    result = runner.invoke(app, ["serve", "--port", "9000", "--repo", str(tmp_path)])
+    assert result.exit_code == 0
+    command = seen[0]
+    assert command[:4] == ["/bin/uv", "tool", "run", "--from"]
+    assert command[4].startswith("skill-dojo[web]==")
+    assert command[-4:] == ["--port", "9000", "--repo", str(tmp_path)][-4:]
+
+
+def test_serve_does_not_rerun_twice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setitem(sys.modules, "skill_dojo_web", None)
+    monkeypatch.setenv("SKILL_DOJO_WEB_REEXEC", "1")
+    monkeypatch.setattr("skill_dojo_cli.serve.shutil.which", lambda _: "/bin/uv")
+    result = runner.invoke(app, ["serve", "--repo", str(tmp_path)])
+    assert result.exit_code == 2
 
 
 def test_serve_starts_the_web_ui_for_the_repo_root(

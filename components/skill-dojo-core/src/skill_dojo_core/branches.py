@@ -16,7 +16,7 @@ from skill_dojo_core.context import Context
 from skill_dojo_core.errors import NotFoundError
 from skill_dojo_core.github import PullRequest
 from skill_dojo_core.models import Channel
-from skill_dojo_core.registry import Registry
+from skill_dojo_core.registry import REGISTRY_DIR, Registry
 
 CANDIDATE = "candidate/"
 QUARANTINE = "quarantine/"
@@ -76,6 +76,11 @@ def remote_start(repo: Path, base: str) -> str:
         raise NotFoundError(
             f"branch '{base}' not found on origin; create it with "
             f"'git push origin main:{base}'"
+        )
+    if git.show_file(repo, start, f"{REGISTRY_DIR}/config.yaml") is None:
+        raise NotFoundError(
+            f"'{start}' has no {REGISTRY_DIR}/config.yaml; push the initialised "
+            f"registry first: 'git push origin <local branch>:{base}'"
         )
     return start
 
