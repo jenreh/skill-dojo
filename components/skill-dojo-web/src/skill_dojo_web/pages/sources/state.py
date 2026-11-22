@@ -8,6 +8,7 @@ import skill_dojo_core as core
 from skill_dojo_core import SourceType
 from skill_dojo_web.state import AppState
 
+DETECT = "detect"
 TYPE_LABEL = {
     "agent_plugins_marketplace": "agent plugins",
     "claude_marketplace": "claude",
@@ -34,7 +35,7 @@ class SourcesState(AppState):
     adding: bool = False
     new_id: str = ""
     new_repo: str = ""
-    new_type: str = SourceType.AGENT_PLUGINS_MARKETPLACE.value
+    new_type: str = DETECT
 
     @rx.var
     def source(self) -> dict[str, Any]:
@@ -141,7 +142,7 @@ class SourcesState(AppState):
                 self._ctx(),
                 self.new_id.strip(),
                 self.new_repo.strip(),
-                kind=SourceType(self.new_type),
+                kind=None if self.new_type == DETECT else SourceType(self.new_type),
             )
             self._say(f"Added source '{self.new_id}'")
             self.selected, self.adding, self.new_id, self.new_repo = (

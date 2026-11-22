@@ -8,6 +8,7 @@ Idempotent: a second run changes nothing.
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -29,6 +30,7 @@ from skill_dojo_core.models import (
     ItemKind,
     ItemLock,
     RegistryConfig,
+    ToolPin,
 )
 from skill_dojo_core.overlay import Overlay
 from skill_dojo_core.registry import LOCK, REGISTRY_DIR, Registry, render_lock
@@ -489,12 +491,28 @@ def plan(reg: Registry) -> Overlay:
         flat_skills(reg, overlay)
     overlay.write(catalogs.AGENTS_CATALOG, catalogs.agents_catalog(reg.config, plugins))
     overlay.write(catalogs.CLAUDE_CATALOG, catalogs.claude_catalog(reg.config, plugins))
-    overlay.write(
-        workflows.VALIDATE_WORKFLOW, workflows.validate_workflow(reg.config.tool)
+    pin = reg.config.tool
+    write_workflow(
+        overlay, pin, workflows.VALIDATE_WORKFLOW, workflows.validate_workflow
     )
-    overlay.write(workflows.SYNC_WORKFLOW, workflows.sync_workflow(reg.config.tool))
+    write_workflow(overlay, pin, workflows.SYNC_WORKFLOW, workflows.sync_workflow)
     overlay.write(f"{REGISTRY_DIR}/{LOCK}", render_lock(reg.lock))
     return overlay
+
+
+def write_workflow(
+    overlay: Overlay, pin: ToolPin, rel: str, render: Callable[[ToolPin], str]
+) -> None:
+    """Write a workflow unless it already runs the pinned skill-dojo.
+
+    The template belongs to the skill-dojo that renders it, and CI runs the
+    pinned one, so a newer local tool must not fight it over the same pin.
+    """
+    current = overlay.read_text(rel)
+    if current is not None and f"{workflows.tool_command(pin)} " in current:
+        log.debug("Keeping %s: it runs the pinned skill-dojo", rel)
+        return
+    overlay.write(rel, render(pin))
 
 
 def apply_build(reg: Registry) -> list[str]:

@@ -38,6 +38,29 @@ class UpstreamPlugin(Result):
     allowed: bool = True
 
 
+GITHUB_HOST = "github.com/"
+
+
+def normalize_repository(repository: str) -> str:
+    """What ``source add`` stores: ``owner/name`` and ``github.com/owner/name``
+    become ``https://github.com/owner/name``; URLs and ``git@`` stay as given."""
+    text = repository.strip()
+    if URL_RE.match(text):
+        return text
+    name = text.removeprefix(GITHUB_HOST)
+    if OWNER_REPO_RE.match(name) and not name.startswith(("-", ".")):
+        return f"{GITHUB}{name}"
+    raise InvalidInputError(f"'{repository}' is not owner/name or a git URL")
+
+
+def detect_type(root: Path) -> SourceType:
+    """The kind of source a checkout holds: a catalog, else a plain git repo."""
+    for kind, rel in DEFAULT_PATHS.items():
+        if (root / rel).is_file():
+            return kind
+    return SourceType.GIT
+
+
 def repo_url(repository: str) -> str:
     """``owner/name`` -> GitHub URL; a full git URL stays as it is."""
     if OWNER_REPO_RE.match(repository):

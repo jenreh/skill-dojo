@@ -22,8 +22,11 @@ def source_add(
         ),
     ],
     kind: Annotated[
-        SourceType, typer.Option("--type", help="What the repository holds.")
-    ] = SourceType.AGENT_PLUGINS_MARKETPLACE,
+        SourceType | None,
+        typer.Option(
+            "--type", help="What the repository holds (default: detected from it)."
+        ),
+    ] = None,
     ref: Annotated[str, typer.Option(help="Branch or tag to track.")] = "main",
     marketplace_path: Annotated[
         str | None, typer.Option(help="Catalog path if not the default.")

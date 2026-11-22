@@ -4,7 +4,7 @@ import appkit_mantine as mn
 import reflex as rx
 
 from skill_dojo_web.components.common import badge, mono, section_title
-from skill_dojo_web.pages.sources.state import TYPE_LABEL
+from skill_dojo_web.pages.sources.state import DETECT, TYPE_LABEL
 from skill_dojo_web.pages.sources.state import SourcesState as S
 
 
@@ -41,7 +41,10 @@ def add_form() -> rx.Component:
             ),
             mn.select(
                 label="Type",
-                data=[{"value": k, "label": v} for k, v in TYPE_LABEL.items()],
+                data=[
+                    {"value": DETECT, "label": "detect from the repository"},
+                    *({"value": k, "label": v} for k, v in TYPE_LABEL.items()),
+                ],
                 value=S.new_type,
                 on_change=S.set_new_type,
                 allow_deselect=False,

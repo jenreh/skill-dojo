@@ -2,12 +2,17 @@
 
 import logging
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from skill_dojo_core import git, mcp_registry, sources
 from skill_dojo_core.branches import base_branch, remote_start
 from skill_dojo_core.context import Context
-from skill_dojo_core.errors import ConflictError, InvalidInputError, NotFoundError
+from skill_dojo_core.errors import (
+    ConflictError,
+    InvalidInputError,
+    NotFoundError,
+    SkillDojoError,
+)
 from skill_dojo_core.models import ItemsFile, LockFile, Source, SourceType
 from skill_dojo_core.registry import (
     ITEMS,
@@ -40,9 +45,14 @@ class BrowseResult(Result):
 
 def tracked_plugins(ctx: Context, source_id: str) -> dict[str, str]:
     """Upstream plugin -> how staging uses it (mirror, bundle part)."""
-    start = remote_start(ctx.repo, base_branch(Registry.load(ctx.repo)))
-    items = model_at(ctx.repo, start, ITEMS, ItemsFile)
-    locks = model_at(ctx.repo, start, LOCK, LockFile).items
+    reg = Registry.load(ctx.repo)
+    try:
+        start = remote_start(ctx.repo, base_branch(reg))
+        items = model_at(ctx.repo, start, ITEMS, ItemsFile)
+        locks = model_at(ctx.repo, start, LOCK, LockFile).items
+    except SkillDojoError:
+        # No origin or no staging yet: what this checkout tracks.
+        items, locks = reg.items, reg.lock.items
     found: dict[str, str] = {}
     for item in items.items:
         if item.source == source_id and item.upstream_plugin:
@@ -78,23 +88,27 @@ def source_add(
     source_id: str,
     repository: str,
     *,
-    kind: SourceType = SourceType.AGENT_PLUGINS_MARKETPLACE,
+    kind: SourceType | None = None,
     ref: str = "main",
     marketplace_path: str | None = None,
     allowlist: list[str] | None = None,
 ) -> SourcesResult:
     """Add an upstream source to ``registry/sources.yaml``.
 
-    An MCP Registry source takes the registry's base URL as ``repository``.
+    ``owner/name`` is stored as its GitHub URL. Without ``kind`` the type is
+    read from the upstream: an Agent Plugins catalog, a Claude Code catalog or
+    a plain git repo. An MCP Registry source takes the registry's base URL.
     """
     if kind is SourceType.MCP_REGISTRY:
         repository = mcp_registry.check_url(repository)
         if marketplace_path is not None:
             raise InvalidInputError("an MCP Registry source has no catalog path")
     else:
-        sources.repo_url(repository)
+        repository = sources.normalize_repository(repository)
     if marketplace_path is not None:
         sources.safe_path(marketplace_path)
+    if kind is None:
+        kind = _detect(ctx, repository, ref, marketplace_path)
     with repo_lock(ctx.repo):
         reg = Registry.load(ctx.repo)
         if any(s.id == source_id for s in reg.sources.sources):
@@ -118,6 +132,24 @@ def source_add(
         _save(reg)
     ctx.report(f"Added source '{source_id}'")
     return SourcesResult(sources=reg.sources.sources)
+
+
+def _detect(
+    ctx: Context, repository: str, ref: str, marketplace_path: str | None
+) -> SourceType:
+    """The source type: from the catalog path if given, else from the upstream."""
+    if marketplace_path is not None:
+        parent = PurePosixPath(marketplace_path).parent.name
+        if parent == ".claude-plugin":
+            return SourceType.CLAUDE_MARKETPLACE
+        return SourceType.AGENT_PLUGINS_MARKETPLACE
+    probe = Source(id="probe", type=SourceType.GIT, repository=repository, ref=ref)
+    with tempfile.TemporaryDirectory(prefix="skill-dojo-") as tmp:
+        root = Path(tmp) / "src"
+        checkout_source(ctx, probe, root)
+        found = sources.detect_type(root)
+    ctx.report(f"Detected {found.value} in {repository}")
+    return found
 
 
 def source_list(ctx: Context) -> SourcesResult:

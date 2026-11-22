@@ -172,4 +172,5 @@ def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert (work / "assets" / "css" / "fonts.css").is_file()
     assert "backend_port=8099" in (work / "rxconfig.py").read_text()
     assert "skill_dojo_web.app" in (work / "rxconfig.py").read_text()
+    assert '"http://localhost:8099"' in (work / "rxconfig.py").read_text()
     assert server.command(8099)[-3:] == ["8099", "--backend-host", "127.0.0.1"]
