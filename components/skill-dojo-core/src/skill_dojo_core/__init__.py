@@ -3,14 +3,8 @@
 Front ends (CLI, web UI, a later server) import only from this module.
 """
 
+from skill_dojo_core.branches import WorkBranch, main_branch, work_branch
 from skill_dojo_core.commands.adopt import AdoptResult, adopt
-from skill_dojo_core.commands.bundles import bundle_add, bundle_create, bundle_remove
-from skill_dojo_core.commands.candidates import (
-    CandidateResult,
-    FlagsResult,
-    flags,
-    mirror,
-)
 from skill_dojo_core.commands.clients import (
     ClientsResult,
     clients_add,
@@ -23,31 +17,37 @@ from skill_dojo_core.commands.items import (
     local_add,
     lock_refresh,
 )
+from skill_dojo_core.commands.marketplace import (
+    MarketplaceResult,
+    marketplace_add,
+    marketplace_update,
+)
+from skill_dojo_core.commands.mirror import ChangeResult, FlagsResult, flags, mirror
 from skill_dojo_core.commands.overview import (
-    RevokePreview,
-    PluginParts,
-    BundlesOverview,
-    plugin_parts,
-    bundles_overview,
-    PartInfo,
-    BundleInfo,
     AuditEvent,
     AuditResult,
     CatalogPreview,
+    ChangesOverview,
+    CommitInfo,
+    PartInfo,
+    PluginInfo,
+    PluginParts,
+    PluginsOverview,
     PreviewResult,
-    PromotionItem,
     ReleaseOverview,
-    ReviewDetail,
+    RevokePreview,
     RevokeTarget,
     TagInfo,
     TreeEntry,
     audit_log,
+    changes_overview,
     marketplace_preview,
+    plugin_parts,
+    plugins_overview,
     release_overview,
-    review_detail,
     revoke_preview,
 )
-from skill_dojo_core.commands.promote import PolicyBlock, PromoteResult, promote
+from skill_dojo_core.commands.plugins import add_parts, plugin_new, remove_parts
 from skill_dojo_core.commands.release import (
     ReleaseResult,
     RevokeResult,
@@ -55,19 +55,6 @@ from skill_dojo_core.commands.release import (
     revoke,
 )
 from skill_dojo_core.commands.repo import BuildResult, InitResult, build, init, validate
-from skill_dojo_core.commands.review import (
-    ReviewActionResult,
-    ReviewEntry,
-    ReviewListResult,
-    ReviewShowResult,
-    review_approve,
-    review_decide,
-    review_list,
-    review_policy,
-    review_quarantine,
-    review_reject,
-    review_show,
-)
 from skill_dojo_core.commands.sources import (
     BrowseResult,
     SourcesResult,
@@ -75,64 +62,69 @@ from skill_dojo_core.commands.sources import (
     source_add,
     source_allow,
     source_list,
+    source_refresh,
     source_remove,
 )
 from skill_dojo_core.commands.sync import SyncResult, sync
-from skill_dojo_core.commands.vendor import VendorResult, vendor
-from skill_dojo_core.branches import base_branch, main_branch
+from skill_dojo_core.commands.versions import (
+    PendingVersion,
+    pending_versions,
+    set_version,
+)
+from skill_dojo_core.commands.work import FinishResult, WorkStatus, finish, status
 from skill_dojo_core.context import Context
-from skill_dojo_core.models import Channel, RiskTier
-from skill_dojo_core.registry import Registry
-from skill_dojo_core.risk import severity as flag_severity
 from skill_dojo_core.diffs import DiffFile, DiffLine
 from skill_dojo_core.errors import (
     ConflictError,
     ExternalToolError,
-    RegistryError,
     InvalidInputError,
     NotFoundError,
     NotImplementedYetError,
     PolicyError,
+    RegistryError,
     RepoLockedError,
     SkillDojoError,
     ValidationFailedError,
     not_implemented,
 )
-from skill_dojo_core.github import GhCli, GitHub, PullRequest, Review
-from skill_dojo_core.repo_lock import repo_lock
+from skill_dojo_core.github import GhCli, GitHub, PullRequest
 from skill_dojo_core.models import (
-    Approval,
     Client,
+    RiskTier,
     Source,
     SourceType,
     ToolPin,
     tool_pin,
 )
-from skill_dojo_core.risk import RiskFlag
-from skill_dojo_core.sources import UpstreamPlugin
+from skill_dojo_core.registry import Registry
+from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
+from skill_dojo_core.risk import RiskFlag
+from skill_dojo_core.risk import severity as flag_severity
+from skill_dojo_core.sources import UpstreamPlugin
 from skill_dojo_core.validation import Finding, ValidationReport
+from skill_dojo_core.versions import LEVELS
 
 __all__ = [
+    "LEVELS",
     "AdoptResult",
-    "Approval",
     "AuditEvent",
     "AuditResult",
     "BrowseResult",
     "BuildResult",
-    "BundleInfo",
-    "BundlesOverview",
-    "CandidateResult",
     "CatalogPreview",
-    "Channel",
+    "ChangeResult",
+    "ChangesOverview",
     "Client",
     "ClientsResult",
+    "CommitInfo",
     "ConflictError",
     "Context",
     "DiffFile",
     "DiffLine",
     "ExternalToolError",
     "Finding",
+    "FinishResult",
     "FlagsResult",
     "GhCli",
     "GitHub",
@@ -140,15 +132,16 @@ __all__ = [
     "InvalidInputError",
     "LocalAddResult",
     "LockRefreshResult",
+    "MarketplaceResult",
     "NotFoundError",
     "NotImplementedYetError",
     "PartInfo",
+    "PendingVersion",
+    "PluginInfo",
     "PluginParts",
-    "PolicyBlock",
+    "PluginsOverview",
     "PolicyError",
     "PreviewResult",
-    "PromoteResult",
-    "PromotionItem",
     "PullRequest",
     "Registry",
     "RegistryError",
@@ -156,12 +149,6 @@ __all__ = [
     "ReleaseResult",
     "RepoLockedError",
     "Result",
-    "Review",
-    "ReviewActionResult",
-    "ReviewDetail",
-    "ReviewEntry",
-    "ReviewListResult",
-    "ReviewShowResult",
     "RevokePreview",
     "RevokeResult",
     "RevokeTarget",
@@ -178,49 +165,48 @@ __all__ = [
     "UpstreamPlugin",
     "ValidationFailedError",
     "ValidationReport",
-    "VendorResult",
+    "WorkBranch",
+    "WorkStatus",
+    "add_parts",
     "adopt",
     "audit_log",
-    "base_branch",
     "browse",
     "build",
-    "bundle_add",
-    "bundle_create",
-    "bundle_remove",
-    "bundles_overview",
+    "changes_overview",
     "clients_add",
     "clients_list",
     "clients_remove",
+    "finish",
     "flag_severity",
     "flags",
     "init",
     "local_add",
     "lock_refresh",
     "main_branch",
+    "marketplace_add",
     "marketplace_preview",
+    "marketplace_update",
     "mirror",
     "not_implemented",
+    "pending_versions",
+    "plugin_new",
     "plugin_parts",
-    "promote",
+    "plugins_overview",
     "release",
     "release_overview",
+    "remove_parts",
     "repo_lock",
-    "review_approve",
-    "review_decide",
-    "review_detail",
-    "review_list",
-    "review_policy",
-    "review_quarantine",
-    "review_reject",
-    "review_show",
     "revoke",
     "revoke_preview",
+    "set_version",
     "source_add",
     "source_allow",
     "source_list",
+    "source_refresh",
     "source_remove",
+    "status",
     "sync",
     "tool_pin",
     "validate",
-    "vendor",
+    "work_branch",
 ]

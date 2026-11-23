@@ -118,15 +118,15 @@ def test_init_adopt_reports(repo: Path) -> None:
     assert "likely from upstream" in result.output
 
 
-def test_vendor_command(repo: Path, fixture_repos: FixtureRepos) -> None:
+def test_marketplace_command(repo: Path, fixture_repos: FixtureRepos) -> None:
     market = fixture_repos.create("market", {"skills/a/SKILL.md": "x\n"})
-    result = invoke("vendor", market.url)
+    result = invoke("marketplace", "add", market.url)
     assert result.exit_code == 0, result.output
-    assert "Vendored .agents/market at main" in result.output
-    assert "Updated" in invoke("vendor", market.url, "--update").output
+    assert "Added .agents/market at main" in result.output
+    assert "Updated" in invoke("marketplace", "update", market.url).output
 
 
-def test_source_mirror_sync_flags_commands(
+def test_source_mirror_parts_sync_flags_commands(
     repo: Path, fixture_repos: FixtureRepos, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = FakeGitHub()
@@ -135,17 +135,60 @@ def test_source_mirror_sync_flags_commands(
     invoke("init", "--name", "acme", "--tool-git", "1" * 40)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "init")
-    git(repo, "push", "-q", "origin", "HEAD:staging")
+    git(repo, "push", "-q", "origin", "HEAD:main")
     ap = fixture_repos.agent_plugins_marketplace()
     assert invoke("source", "add", "ap", ap.url, "--allow", "hello").exit_code == 0
     assert "agent_plugins_marketplace" in invoke("source", "list").output
-    assert "hello" in invoke("browse", "ap").output
-    mirrored = invoke("mirror", "ap", "hello")
-    assert "hello: opened" in mirrored.output
-    assert "No mirrors or bundles to sync" in invoke("sync").output
+    browsed = invoke("browse", "ap", "--parts").output
+    assert "(cached)" in browsed
+    assert "ap:hello/skill/greet" in browsed
+    assert "Refreshed ap" in invoke("source", "refresh", "ap").output
+    assert "Allowed" in invoke("source", "allow", "ap", "hello").output
+    assert "hello: added" in invoke("mirror", "ap", "hello").output
+    made = invoke("add-parts", "kit", "ap:hello/skill/greet", "--create")
+    assert "kit: created" in made.output, made.output
+    assert "kit: updated" in invoke("remove-parts", "kit", "skill/greet").output
+    assert "own: created" in invoke("plugin", "new", "own").output
+    assert "own: new -> 1.0.0" in invoke("version", "own", "--major").output
+    bad = runner.invoke(app, ["version", "own"])
+    assert bad.exit_code != 0
+    synced = invoke("sync").output
+    assert "hello: up-to-date" in synced
     assert "## Risk flags" in invoke("flags").output
+    status = invoke("status").output
+    assert "skill-dojo/changes (checked out)" in status
+    assert "own [local, added]" in status
+    assert "PR opened" in invoke("finish").output
+    assert "PR #1 open" in invoke("status").output
     invoke("source", "add", "spare", ap.url)
     assert "Removed" in invoke("source", "remove", "spare").output
+
+
+def test_release_and_revoke_commands(
+    repo: Path, fixture_repos: FixtureRepos, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeGitHub()
+    monkeypatch.setattr("skill_dojo_cli.context.GhCli", lambda cwd: fake)
+    remote = fixture_repos.root / "remotes" / "curated.git"
+    fake.remote = remote
+    invoke("init", "--name", "acme", "--tool-git", "1" * 40)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "init")
+    git(repo, "push", "-q", "origin", "HEAD:main")
+    assert "No work branch" in invoke("status").output
+    assert "Nothing to finish" in invoke("finish").output
+    invoke("plugin", "new", "own")
+    assert "Pushed skill-dojo/changes" in invoke("finish", "--no-pr").output
+    assert "PR opened" in invoke("finish", "--level", "own=minor").output
+    assert fake.merge(1)
+    released = invoke("release")
+    assert "Tagged marketplace-v" in released.output
+    assert "GitHub Release:" in released.output
+    assert "nothing to release" in invoke("release").output
+    assert "team" in invoke("clients", "add", "team", "main").output
+    revoked = invoke("revoke", "own")
+    assert "own: removed" in revoked.output
+    assert "team (main)" in revoked.output
 
 
 def test_mcp_registry_browse_and_mirror(
@@ -159,10 +202,10 @@ def test_mcp_registry_browse_and_mirror(
     invoke("init", "--name", "acme", "--tool-git", "1" * 40)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "init")
-    git(repo, "push", "-q", "origin", "HEAD:staging")
+    git(repo, "push", "-q", "origin", "HEAD:main")
     added = invoke("source", "add", "mcp", registry.url, "--type", "mcp_registry")
     assert added.exit_code == 0, added.output
     listed = invoke("browse", "mcp", "--search", "acme").output
     assert "io.github.acme/weather 1.0.0" in listed
     assert "cannot mirror" in listed
-    assert "weather: opened" in invoke("mirror", "mcp", "io.github.acme/weather").output
+    assert "weather: added" in invoke("mirror", "mcp", "io.github.acme/weather").output

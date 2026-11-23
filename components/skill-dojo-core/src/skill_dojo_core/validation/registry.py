@@ -9,12 +9,11 @@ from skill_dojo_core.builder import (
     CLAUDE_MANIFEST,
     PLUGINS_DIR,
     ROOT_MANIFEST,
-    approval_for,
     is_generated,
     plugin_dir,
     provenance,
 )
-from skill_dojo_core.models import Item, ItemLock
+from skill_dojo_core.models import Item, ItemLock, RiskTier
 from skill_dojo_core.registry import Registry
 from skill_dojo_core.validation.report import Collector
 from skill_dojo_core.validation.skills import skill_folders
@@ -25,18 +24,12 @@ EXTENSION_FIELDS = (
     "kind",
     "upstreamCommit",
     "sourceDigest",
-    "approvedBy",
-    "approvedAt",
-    "reviewEvidence",
 )
 SKILL_FIELDS = (
     "id",
     "kind",
     "source-commit",
     "source-digest",
-    "approved-by",
-    "approved-at",
-    "review-evidence",
 )
 
 
@@ -47,7 +40,8 @@ def check_tracking(reg: Registry, rep: Collector) -> None:
     for name in sorted(present - tracked):
         rep.error(
             f"{PLUGINS_DIR}/{name}",
-            "not tracked in registry/items.yaml (run 'skill-dojo local add')",
+            "not tracked in registry/items.yaml "
+            "(run 'skill-dojo plugin new' or 'skill-dojo local add')",
         )
     for name in sorted(tracked - present):
         rep.error("registry/items.yaml", f"item '{name}' has no {plugin_dir(name)}")
@@ -59,6 +53,12 @@ def check_tracking(reg: Registry, rep: Collector) -> None:
             rep.error(
                 "registry/items.yaml",
                 f"'{item.id}' uses unknown source '{item.source}'",
+            )
+        tier = item.risk_tier or reg.policy.default_risk_tier
+        if tier is RiskTier.FORBIDDEN:
+            rep.error(
+                "registry/items.yaml",
+                f"'{item.id}' has risk tier forbidden; remove or revoke it",
             )
         classification = item.data_classification
         if classification and classification not in reg.policy.data_classifications:
@@ -82,7 +82,7 @@ def check_drift(reg: Registry, item: Item, lock: ItemLock, rep: Collector) -> No
     current = current_files(reg, item, lock)
     for found in hashing.drift(lock.files, current):  # ty: ignore[invalid-argument-type]
         hint = (
-            "run 'skill-dojo lock refresh'"
+            "run 'skill-dojo build'"
             if item.kind.value == "local"
             else "mirrored content must not be edited by hand"
         )
@@ -130,9 +130,7 @@ def check_provenance(reg: Registry, item: Item, lock: ItemLock, rep: Collector) 
         if not isinstance(data, dict):
             continue
         manifest = manifest or data
-        expected = provenance(
-            reg.config, reg.policy, item, lock, data, approval=approval_for(reg, item)
-        )
+        expected = provenance(reg.config, reg.policy, item, lock, data)
         _compare(
             f"{plugin_dir(item.id)}/{rel}",
             metadata.read_extension(path, ns),
@@ -155,7 +153,6 @@ def check_provenance(reg: Registry, item: Item, lock: ItemLock, rep: Collector) 
             lock,
             manifest,
             folder.name,
-            approval=approval_for(reg, item),
         )
         prefixed = expected.skill_metadata(ns.skill)
         plain = {k[len(ns.skill) :]: v for k, v in prefixed.items()}

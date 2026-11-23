@@ -47,7 +47,6 @@ def test_pull_request_commands(tmp_path: Path) -> None:
   "pr create") echo https://github.invalid/o/r/pull/7 ;;
   "pr view") echo '{PR_JSON}' ;;
   "pr edit") ;;
-  "pr comment") echo "$@" > {tmp_path}/comment ;;
 esac
 """
     gh = GhCli(cwd=tmp_path, executable=fake_gh(tmp_path, script))
@@ -56,8 +55,6 @@ esac
     assert found.number == 7
     assert gh.open_pull_request("h", "staging", "t", "b").base == "staging"
     assert gh.update_pull_request(7, "t", "b").title == "t"
-    gh.comment(7, "hello")
-    assert "hello" in (tmp_path / "comment").read_text()
 
 
 def test_no_open_pull_request(tmp_path: Path) -> None:
@@ -71,20 +68,14 @@ MERGED_JSON = (
     '"author": {"login": "alice"}, "mergedAt": "2026-11-21T11:00:00Z", '
     '"mergeCommit": {"oid": "' + "a" * 40 + '"}, "mergedBy": {"login": "carol"}}'
 )
-REVIEWS_JSON = (
-    '{"latestReviews": [{"author": {"login": "dave"}, "state": "APPROVED", '
-    '"submittedAt": "2026-11-21T10:30:00Z"}]}'
-)
 
 
-def test_review_and_merge_commands(tmp_path: Path) -> None:
+def test_merged_pull_requests_and_releases(tmp_path: Path) -> None:
     script = f"""echo "$@" >> {tmp_path}/calls
 case "$*" in
   "pr list --base=staging --state=merged"*) echo '[{MERGED_JSON}]' ;;
-  *latestReviews*) echo '{REVIEWS_JSON}' ;;
-  "pr view 8 --json mergeStateStatus") echo '{{"mergeStateStatus": "CLEAN"}}' ;;
-  "pr view 9 --json mergeStateStatus") echo '{{"mergeStateStatus": "BLOCKED"}}' ;;
   "pr view 8 --json"*) echo '{MERGED_JSON}' ;;
+  "release create"*) echo https://github.invalid/o/r/releases/tag/v1 ;;
 esac
 """
     gh = GhCli(cwd=tmp_path, executable=fake_gh(tmp_path, script))
@@ -92,15 +83,12 @@ esac
     assert (merged.merged_by, merged.author) == ("carol", "alice")
     assert merged.merge_commit == "a" * 40
     assert gh.get_pull_request(8).number == 8
-    review = gh.reviews(8)[0]
-    assert (review.user, review.state) == ("dave", "APPROVED")
-    gh.approve(8, "ok")
-    assert gh.merge(8, head_oid="b" * 40) is True
-    assert gh.merge(9) is False
+    url = gh.create_release("v1", "Marketplace v1", "notes")
+    assert url.endswith("/releases/tag/v1")
     calls = (tmp_path / "calls").read_text()
-    assert "pr review 8 --approve --body=ok" in calls
-    assert f"pr merge 8 --merge --match-head-commit={'b' * 40}" in calls
-    assert "pr merge 9" not in calls
+    assert (
+        "release create v1 --verify-tag --title=Marketplace v1 --notes=notes" in calls
+    )
 
 
 def test_find_open_pull_request_ignores_forks(tmp_path: Path) -> None:

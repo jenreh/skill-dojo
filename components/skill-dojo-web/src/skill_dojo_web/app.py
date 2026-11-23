@@ -9,14 +9,14 @@ import reflex as rx
 
 from skill_dojo_web import theme
 from skill_dojo_web.pages.audit import page as audit
-from skill_dojo_web.pages.bundles import page as bundles
+from skill_dojo_web.pages.changes import page as changes
 from skill_dojo_web.pages.clients import page as clients
+from skill_dojo_web.pages.plugins import page as plugins
 from skill_dojo_web.pages.preview import page as preview
 from skill_dojo_web.pages.releases import page as releases
-from skill_dojo_web.pages.review import page as review
 from skill_dojo_web.pages.sources import page as sources
 
-PAGES = [review, sources, bundles, preview, releases, clients, audit]
+PAGES = [changes, sources, plugins, preview, releases, clients, audit]
 
 theme.install()
 app = rx.App(

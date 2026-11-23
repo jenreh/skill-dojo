@@ -1,4 +1,4 @@
-"""One generated catalog, as changes against staging or the full file."""
+"""One generated catalog, as changes against main or the full file."""
 
 import appkit_mantine as mn
 import reflex as rx
@@ -66,7 +66,7 @@ def catalog_view() -> rx.Component:
                         line["kind"].to(str), line["number"], line["text"]
                     ),
                 ),
-                rx.cond(S.lines.length() == 0, empty("No changes against staging.")),
+                rx.cond(S.lines.length() == 0, empty("No changes against main.")),
                 type="auto",
             ),
             py="xs",

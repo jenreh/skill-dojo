@@ -1,4 +1,5 @@
-"""Item commands: ``mirror``, ``bundle``, ``local``, ``lock`` and ``sync``."""
+"""Item commands: ``mirror``, ``add-parts``, ``remove-parts``, ``plugin``,
+``version``, ``local``, ``lock`` and ``sync``."""
 
 from pathlib import Path
 from typing import Annotated
@@ -9,16 +10,17 @@ import skill_dojo_core as core
 from skill_dojo_cli.context import build_context
 from skill_dojo_cli.output import echo_lines
 
-bundle_app = typer.Typer(help="Build plugins out of parts from several sources.")
-local_app = typer.Typer(help="Register the team's own plugins.")
+plugin_app = typer.Typer(help="Create the team's own plugins.")
+local_app = typer.Typer(help="Register a plugin folder that is already there.")
 lock_app = typer.Typer(help="Maintain registry/lock.json.")
 
 ItemOption = Annotated[str | None, typer.Option(help="Only this item.")]
 
 
-def echo_candidate(result: core.CandidateResult) -> None:
-    where = f" {result.pull_request.url}" if result.pull_request else ""
-    typer.echo(f"{result.item}: {result.status}{where}")
+def echo_change(result: core.ChangeResult) -> None:
+    pin = f" @ {result.pin[:12]}" if result.pin else ""
+    commit = f" (commit {result.commit[:12]})" if result.commit else ""
+    typer.echo(f"{result.item}: {result.status}{pin}{commit}")
     for flag in result.flags:
         line = f":{flag.line}" if flag.line else ""
         typer.echo(f"  {flag.kind} {flag.path}{line} {flag.detail}")
@@ -31,53 +33,97 @@ def mirror(
         str | None, typer.Option("--as", help="Item id (default: plugin name).")
     ] = None,
 ) -> None:
-    """Mirror one upstream plugin as a candidate PR into staging."""
-    ctx = build_context(Path.cwd(), need_actor=True)
-    echo_candidate(core.mirror(ctx, source_id, plugin, item_id=item))
+    """Mirror one whole upstream plugin onto the work branch."""
+    echo_change(core.mirror(build_context(Path.cwd()), source_id, plugin, item_id=item))
 
 
-def sync(item: ItemOption = None) -> None:
-    """Open candidate PRs for upstream changes."""
-    result = core.sync(build_context(Path.cwd(), need_actor=True), item=item)
-    if not result.candidates:
-        typer.echo("No mirrors or bundles to sync.")
-    for candidate in result.candidates:
-        echo_candidate(candidate)
+PARTS = typer.Argument(
+    help="Parts as source:plugin/kind/name (kind: skill, agent, mcp_server, hook; "
+    "source 'local' = this repo)."
+)
 
 
-PARTS = typer.Argument(help="Parts as source:plugin/kind/name.")
-PartsArgument = Annotated[list[str], PARTS]
-
-
-@bundle_app.command("create")
-def bundle_create(
-    name: str,
+def add_parts(
+    plugin: Annotated[str, typer.Argument(help="The local plugin to add to.")],
     parts: Annotated[list[str] | None, PARTS] = None,
-    description: Annotated[str | None, typer.Option(help="Plugin text.")] = None,
+    create: Annotated[
+        bool, typer.Option("--create", help="Create the plugin first.")
+    ] = False,
+    description: Annotated[
+        str | None, typer.Option(help="Text of a new plugin.")
+    ] = None,
     category: Annotated[str | None, typer.Option(help="Catalog category.")] = None,
 ) -> None:
-    """Create a new bundle plugin as a candidate PR."""
-    ctx = build_context(Path.cwd(), need_actor=True)
-    echo_candidate(
-        core.bundle_create(ctx, name, parts, description=description, category=category)
+    """Copy parts of upstream plugins into a local plugin."""
+    echo_change(
+        core.add_parts(
+            build_context(Path.cwd()),
+            plugin,
+            parts or [],
+            create=create,
+            description=description,
+            category=category,
+        )
     )
 
 
-@bundle_app.command("add")
-def bundle_add(name: str, parts: PartsArgument) -> None:
-    """Add parts (source:plugin/kind/name; source 'local' = this repo)."""
-    ctx = build_context(Path.cwd(), need_actor=True)
-    echo_candidate(core.bundle_add(ctx, name, parts))
-
-
-@bundle_app.command("remove")
-def bundle_remove(
-    name: str,
+def remove_parts(
+    plugin: str,
     parts: Annotated[list[str], typer.Argument(help="Parts as kind/name.")],
 ) -> None:
-    """Remove parts from a bundle."""
-    ctx = build_context(Path.cwd(), need_actor=True)
-    echo_candidate(core.bundle_remove(ctx, name, parts))
+    """Remove parts from a local plugin."""
+    echo_change(core.remove_parts(build_context(Path.cwd()), plugin, parts))
+
+
+@plugin_app.command("new")
+def plugin_new(
+    name: str,
+    description: Annotated[str | None, typer.Option(help="Plugin text.")] = None,
+    category: Annotated[str | None, typer.Option(help="Catalog category.")] = None,
+) -> None:
+    """Create an empty local plugin (0.1.0); add files, then run 'build'."""
+    result = core.plugin_new(
+        build_context(Path.cwd()), name, description=description, category=category
+    )
+    echo_change(result)
+    typer.echo(f"Put its files into plugins/{name}/, then run 'skill-dojo build'.")
+
+
+def version(
+    item: str,
+    patch: Annotated[bool, typer.Option("--patch", help="Next patch.")] = False,
+    minor: Annotated[bool, typer.Option("--minor", help="Next minor.")] = False,
+    major: Annotated[bool, typer.Option("--major", help="Next major.")] = False,
+    exact: Annotated[
+        str | None, typer.Option("--set", help="An exact X.Y.Z above main's.")
+    ] = None,
+) -> None:
+    """Set a local plugin's version relative to its version on main."""
+    levels = [
+        n for n, on in (("patch", patch), ("minor", minor), ("major", major)) if on
+    ]
+    if len(levels) + (exact is not None) != 1:
+        raise typer.BadParameter("give exactly one of --patch, --minor, --major, --set")
+    result = core.set_version(
+        build_context(Path.cwd()),
+        item,
+        level=levels[0] if levels else None,
+        exact=exact,
+    )
+    typer.echo(
+        f"{result.item}: {result.main_version or 'new'} -> {result.branch_version}"
+    )
+
+
+def sync(item: ItemOption = None) -> None:
+    """Commit upstream changes onto the work branch."""
+    result = core.sync(build_context(Path.cwd()), item=item)
+    if result.refreshed:
+        typer.echo(f"Refreshed sources: {', '.join(result.refreshed)}")
+    if not result.changes:
+        typer.echo("No mirrors or plugins with parts to sync.")
+    for change in result.changes:
+        echo_change(change)
 
 
 @local_app.command("add")
@@ -92,9 +138,7 @@ def local_add(
 
 
 @lock_app.command("refresh")
-def lock_refresh(
-    item: ItemOption = None,
-) -> None:
+def lock_refresh(item: ItemOption = None) -> None:
     """Recompute lock entries of local items after an edit."""
     result = core.lock_refresh(build_context(Path.cwd()), item=item)
     if not result.refreshed:

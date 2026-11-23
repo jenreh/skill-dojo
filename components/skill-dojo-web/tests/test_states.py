@@ -11,17 +11,16 @@ import pytest
 from reflex.state import State
 
 import skill_dojo_core as core
-from skill_dojo_core import Context, NotFoundError, mirror
+from skill_dojo_core import Context, NotFoundError, finish, mirror
 from skill_dojo_web import backend, server
 from skill_dojo_web.pages.audit.state import AuditState, day_label
-from skill_dojo_web.pages.bundles.state import BundlesState
+from skill_dojo_web.pages.changes.state import ChangesState
 from skill_dojo_web.pages.clients.state import ClientsState
+from skill_dojo_web.pages.plugins.state import PluginsState
 from skill_dojo_web.pages.preview.state import PreviewState
 from skill_dojo_web.pages.releases.state import ReleasesState
-from skill_dojo_web.pages.review.state import ReviewState
 from skill_dojo_web.pages.sources.state import SourcesState
 from skill_dojo_web.state import failure
-from tests.e2e.test_phase4_release import number
 from tests.support.fake_github import FakeGitHub
 from tests.support.fixture_repos import FixtureRepo
 
@@ -49,71 +48,122 @@ def ui(
     return admin
 
 
-def test_review_state_approves_and_merges(ui: Context, fake_github: FakeGitHub) -> None:
-    made = mirror(ui, "ap", "hello")
-    st = state(ReviewState)
+def test_changes_state_lists_versions_and_choices(
+    ui: Context, fake_github: FakeGitHub
+) -> None:
+    mirror(ui, "ap", "hello")
+    core.plugin_new(ui, "own")
+    st = state(ChangesState)
     call(st, "load")
-    assert st.notice == ""
+    assert st.notice == "", st.notice
     assert st.repository == "acme/market"
-    assert st.queue_count == 1
-    assert [e["item"] for e in st.entries] == ["hello"]
-    assert st.selected == number(made)
-    assert st.detail["new_version"] == "1.0.0"
-    assert st.files
-    call(st, "set_filter", "flagged")
-    assert st.rows == [e for e in st.entries if e["flags"]]
-    call(st, "set_filter", "all")
-    call(st, "set_tier", "low")
-    call(st, "approve")
-    assert fake_github.get(number(made)).state == "MERGED"
-    assert st.notice.endswith("merged")
-    assert st.entries == []
-
-
-def test_review_state_reject_and_errors(ui: Context, fake_github: FakeGitHub) -> None:
-    made = mirror(ui, "ap", "hello")
-    st = state(ReviewState)
+    assert st.branch == "skill-dojo/changes"
+    assert st.queue_count == 2
+    rows = {r["item"]: r for r in st.rows}
+    assert rows["hello"]["editable"] is False
+    assert rows["own"]["shown_branch"] == "0.1.0"
+    assert rows["own"]["choice"] == "patch"
+    assert "skill-dojo/changes (checked out)" in st.branch_line
+    assert st.pr_label == "No open PR"
+    assert any(f["item"] == "hello" for f in st.flags)
+    call(st, "choose", "own", "custom")
+    call(st, "set_custom", "own", " 2.0.0 ")
+    assert st.levels() == {"own": "2.0.0"}
+    call(st, "choose", "own", "major")
+    assert st.levels() == {"own": "major"}
+    finish(ui, levels=st.levels())
     call(st, "load")
-    call(st, "reject")
-    assert fake_github.get(number(made)).state == "CLOSED"
-    call(st, "select", 999)
-    assert st.notice_ok is False
+    assert st.pr_label == "PR #1 open"
+    assert st.pr_url
+    assert {r["item"]: r["shown_branch"] for r in st.rows}["own"] == "1.0.0"
+    assert st.chosen == {"own": "major"}
 
 
-def test_sources_state_browse_mirror_and_add(
+def test_sources_state_browse_mirror_and_parts(
     ui: Context, fake_github: FakeGitHub
 ) -> None:
     st = state(SourcesState)
     call(st, "load")
     assert [s["id"] for s in st.sources] == ["ap", "cl"]
     assert st.selected == "ap"
+    assert st.cached
     assert any(p["name"] == "hello" for p in st.plugins)
     call(st, "set_query", "hel")
     assert [p["name"] for p in st.shown] == ["hello"]
     call(st, "mirror", "hello")
-    assert "hello: opened" in st.notice
-    assert fake_github.pulls
+    assert "hello: added" in st.notice
+    call(st, "expand", "hello")
+    assert [r["spec"] for r in st.part_rows] == ["ap:hello/skill/greet"]
+    call(st, "toggle_pick", "ap:hello/skill/greet")
+    assert st.picked_count == 1
+    call(st, "open_dialog")
+    assert st.dialog
+    assert st.creating
+    assert st.cannot_add
+    call(st, "set_target_name", "kit")
+    call(st, "add_to_plugin")
+    assert "kit: created" in st.notice, st.notice
+    assert st.picked == []
+    call(st, "open_dialog")
+    assert [o["value"] for o in st.target_options][1:] == ["kit"]
+    call(st, "close_dialog")
+    call(st, "expand", "hello")
+    assert st.expanded == ""
+    call(st, "refresh")
+    assert not st.cached
     call(st, "set_new_id", "bad")
     call(st, "set_new_repo", "not a repo")
     call(st, "add_source")
     assert st.notice_ok is False
+    assert not fake_github.pulls
 
 
-def test_releases_clients_preview_audit_bundles(
-    ui: Context, fake_github: FakeGitHub
-) -> None:
-    fake_github.merge_on_github(number(mirror(ui, "ap", "hello")), ["bob"])
+def test_plugins_state_new_plugin_and_scan(ui: Context) -> None:
+    core.add_parts(ui, "kit", ["ap:hello/skill/greet"], create=True)
+    st = state(PluginsState)
+    call(st, "load")
+    assert [p["id"] for p in st.plugins] == ["kit"]
+    assert st.plugins[0]["parts"][0]["short"] == "skill/greet"
+    assert st.cannot_create
+    call(st, "set_new_name", "own")
+    call(st, "set_new_description", "Our things.")
+    call(st, "set_new_category", "Coding")
+    assert st.new_path == "plugins/own/"
+    call(st, "create")
+    assert "plugins/own/" in st.notice
+    skill = ui.repo / "plugins/own/skills/tidy/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: tidy\ndescription: Tidies code. Use when cleaning up.\n---\n"
+    )
+    call(st, "scan")
+    assert "registry/lock.json" in st.scanned
+    call(st, "set_query", "our")
+    assert [p["id"] for p in st.shown] == ["own"]
+    call(st, "remove_part", "kit", "skill/greet")
+    assert "Removed" in st.notice
+    call(st, "remove_part", "kit", "skill/greet")
+    assert st.notice_ok is False
+
+
+def test_releases_clients_preview_audit(ui: Context, fake_github: FakeGitHub) -> None:
+    mirror(ui, "ap", "hello")
+    done = finish(ui)
+    assert done.pull_request is not None
+    assert fake_github.merge(done.pull_request.number)
     rel = state(ReleasesState)
     call(rel, "load")
-    assert [i["item"] for i in rel.items] == ["hello"]
-    assert rel.items[0]["change"].startswith("new")
+    assert rel.untagged
+    assert not rel.nothing_new
+    assert any("mirror hello" in c["subject"] for c in rel.commits)
     call(rel, "set_notes", "Release notes by hand.")
-    rel_promote = core.promote(ui)
-    assert rel_promote.status == "opened"
-    promote_pr = next(p for p in fake_github.pulls if p.head.startswith("promote/"))
-    fake_github.merge(promote_pr.number)
-    call(rel, "tag")
-    assert "marketplace-v" in rel.notice
+    call(rel, "create")
+    assert "Released marketplace-v" in rel.notice, rel.notice
+    assert fake_github.releases[0][2] == "Release notes by hand.\n"
+    assert rel.nothing_new
+    assert rel.tags
+    call(rel, "create")
+    assert "has not changed" in rel.notice
 
     clients = state(ClientsState)
     call(clients, "load")
@@ -129,6 +179,9 @@ def test_releases_clients_preview_audit_bundles(
     assert clients.clients[0]["contact"] == "#web-guild", clients.notice
     call(clients, "remove_client", "web")
     assert clients.clients == []
+    call(clients, "set_action", "remove")
+    call(clients, "revoke")
+    assert "Revoked hello (removed)" in clients.notice, clients.notice
 
     preview = state(PreviewState)
     call(preview, "load")
@@ -140,15 +193,10 @@ def test_releases_clients_preview_audit_bundles(
 
     audit = state(AuditState)
     call(audit, "load")
-    assert {"approval", "release"} <= {e["kind"] for e in audit.events}
+    assert {"merge", "change", "release"} <= {e["kind"] for e in audit.events}
     call(audit, "set_kind", "release")
     assert all(e["kind"] == "release" for d in audit.days for e in d["events"])
     assert call(audit, "export") is not None
-
-    bundles = state(BundlesState)
-    call(bundles, "load")
-    assert bundles.notice == ""
-    assert bundles.bundle == ""
 
 
 def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

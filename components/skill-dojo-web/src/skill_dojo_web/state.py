@@ -28,7 +28,7 @@ def failure(exc: Exception) -> str:
 
 class AppState(rx.State):
     repository: str = ""
-    branch: str = "staging"
+    branch: str = "skill-dojo/changes"
     actor: str = ""
     gh_ok: bool = False
     version: str = backend.tool_version()
@@ -62,9 +62,9 @@ class AppState(rx.State):
             ctx = self._ctx()
             reg = Registry.load(ctx.repo)
             self.repository = reg.config.repository or reg.config.name
-            self.branch = core.base_branch(reg)
+            self.branch = core.work_branch(reg)
             self.actor, self.gh_ok = ctx.actor, True
-            self.queue_count = len(core.review_list(ctx).entries)
+            self.queue_count = len(core.pending_versions(ctx))
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self.gh_ok = False
             self._fail(exc)
@@ -85,13 +85,12 @@ class AppState(rx.State):
                 async with self:
                     self.progress = lines[-1] if lines else self.progress
             result = task.result()
-            opened = [
-                c.item for c in result.candidates if c.status in {"opened", "updated"}
-            ]
+            changed = [c.item for c in result.changes if c.commit]
             async with self:
                 self.synced = "Synced just now"
                 self._say(
-                    f"Sync: {len(opened)} candidate PR(s) {', '.join(opened)}".strip()
+                    f"Sync: {len(changed)} update(s) on the work branch "
+                    f"{', '.join(changed)}".strip()
                 )
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             async with self:

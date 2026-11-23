@@ -300,15 +300,18 @@ def test_branding_turned_on_later_is_not_drift(curated: Context) -> None:
     assert manifest["extensions"]["com.openai"]["interface"]["developerName"] == "Acme"
 
 
-def test_branding_does_not_absorb_a_hand_edit(curated: Context) -> None:
+def test_build_takes_a_local_hand_edit_into_the_lock(curated: Context) -> None:
+    """A local plugin is the team's own: build locks its edits (rev. 2)."""
     add_plugin(curated.repo)
     local_add(curated, "plugins/hello")
     manifest = curated.repo / "plugins/hello/plugin.json"
     manifest.write_text(manifest.read_text().replace('"1.0.0"', '"9.9.9"'))
     config = registry_path(curated.repo, "config.yaml")
     config.write_text(config.read_text() + "branding:\n  developer_name: Acme\n")
-    build(curated)
     assert any("plugin.json: drift: changed" in e for e in errors(curated))
+    build(curated)
+    assert errors(curated) == []
+    assert '"9.9.9"' in manifest.read_text()
 
 
 def test_tool_pin_change_regenerates_workflow(curated: Context) -> None:

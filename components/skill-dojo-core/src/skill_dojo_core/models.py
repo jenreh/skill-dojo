@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     field_validator,
@@ -32,7 +33,16 @@ SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.-]*/[a-zA-Z0-9][a-zA-Z0-9._
 class ItemKind(StrEnum):
     LOCAL = "local"
     MIRROR = "mirror"
-    BUNDLE = "bundle"
+
+
+# Kind names older repos used; ``bundle`` is a local plugin with parts.
+LEGACY_KINDS = {"bundle": ItemKind.LOCAL.value}
+DEFAULT_WORK_BRANCH = "skill-dojo/changes"
+WORK_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def _legacy_kind(value: object) -> object:
+    return LEGACY_KINDS.get(value, value) if isinstance(value, str) else value
 
 
 class RiskTier(StrEnum):
@@ -40,13 +50,6 @@ class RiskTier(StrEnum):
     STANDARD = "standard"
     RESTRICTED = "restricted"
     FORBIDDEN = "forbidden"
-
-
-class Channel(StrEnum):
-    DEV = "dev"
-    BETA = "beta"
-    STABLE = "stable"
-    LTS = "lts"
 
 
 class SourceType(StrEnum):
@@ -166,6 +169,15 @@ class Policy(YamlModel):
     authentication: str = "ON_INSTALL"
 
 
+def _branch_name(value: str) -> str:
+    if not WORK_BRANCH_RE.match(value) or ".." in value or value.endswith("/"):
+        raise ValueError(f"'{value}' is not a valid branch name")
+    return value
+
+
+BranchName = Annotated[str, AfterValidator(_branch_name)]
+
+
 class RegistryConfig(YamlModel):
     name: ItemId
     repository: str | None = Field(
@@ -178,9 +190,17 @@ class RegistryConfig(YamlModel):
     tool: ToolPin
     layout: Layout = Field(default_factory=Layout)
     branding: Branding | None = None
+    work_branch: BranchName = DEFAULT_WORK_BRANCH
+    main_branch: BranchName = "main"
     default_category: str = "Coding"
     default_policy: Policy = Field(default_factory=Policy)
     categories: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _own_work_branch(self) -> RegistryConfig:
+        if self.work_branch == self.main_branch:
+            raise ValueError("work_branch must not be the main branch")
+        return self
 
 
 # --- registry/sources.yaml --------------------------------------------------
@@ -234,10 +254,13 @@ def _plugin_ref(value: str) -> str:
     return _item_id(value)
 
 
-class Part(YamlModel):
-    """One skill, agent or MCP server inside a bundle."""
+type PartKind = Literal["skill", "agent", "mcp_server", "hook"]
 
-    kind: Literal["skill", "agent", "mcp_server"]
+
+class Part(YamlModel):
+    """One skill, agent, MCP server or hook inside a local plugin."""
+
+    kind: PartKind
     name: Annotated[str, AfterValidator(_part_name)]
     source: ItemId | None = None
     upstream_plugin: Annotated[str, AfterValidator(_plugin_ref)] | None = None
@@ -259,15 +282,22 @@ class Item(YamlModel):
     ref: str | None = None
     commit: str | None = None
     quarantined: bool = False
-    supported_channels: list[Channel] = Field(
-        default_factory=lambda: [Channel.BETA, Channel.STABLE]
-    )
     risk_tier: RiskTier | None = None
     data_classification: str | None = None
     allowed_tools: list[str] = Field(default_factory=list)
     category: str | None = None
     policy: Policy | None = None
     deprecation: Deprecation | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate(cls, data: object) -> object:
+        """``kind: bundle`` is ``local``; release channels are gone."""
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k != "supported_channels"}
+            if "kind" in data:
+                data["kind"] = _legacy_kind(data["kind"])
+        return data
 
 
 class ItemsFile(YamlModel):
@@ -285,58 +315,27 @@ class ItemsFile(YamlModel):
         return next((item for item in self.items if item.id == item_id), None)
 
 
-# --- registry/approvals.yaml ------------------------------------------------
-
-
-class Approval(YamlModel):
-    item: str
-    version: str | None = None
-    commit: str | None = None
-    digest: str | None = Field(
-        default=None, description="treeSha256 of the item as it was approved"
-    )
-    pull_request: str
-    reviewers: list[str] = Field(default_factory=list)
-    approved_at: str
-    channel: Channel = Channel.BETA
-    risk_flags: int = 0
-
-
-class ApprovalsFile(YamlModel):
-    approvals: list[Approval] = Field(default_factory=list)
-
-    def for_digest(self, item: str, digest: str) -> Approval | None:
-        """The newest approval of ``item`` with exactly this content."""
-        found = [a for a in self.approvals if a.item == item and a.digest == digest]
-        return max(found, key=lambda a: a.approved_at) if found else None
-
-
 # --- registry/channel-policy.yaml -------------------------------------------
 
-
-class ChannelRule(YamlModel):
-    branch: str
+LEGACY_POLICY_KEYS = frozenset({"channels", "reviewers"})
 
 
 class ChannelPolicy(YamlModel):
+    """Defaults for risk tier and data classification (``channel-policy.yaml``)."""
+
     default_risk_tier: RiskTier = RiskTier.STANDARD
     default_data_classification: str = "internal"
     data_classifications: list[str] = Field(
         default_factory=lambda: ["public", "internal", "confidential"]
     )
-    reviewers: dict[RiskTier, int] = Field(
-        default_factory=lambda: {
-            RiskTier.LOW: 1,
-            RiskTier.STANDARD: 1,
-            RiskTier.RESTRICTED: 2,
-        }
-    )
-    channels: dict[Channel, ChannelRule] = Field(
-        default_factory=lambda: {
-            Channel.BETA: ChannelRule(branch="staging"),
-            Channel.STABLE: ChannelRule(branch="main"),
-        }
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate(cls, data: object) -> object:
+        """Staging channels and reviewer counts are gone (rev. 2)."""
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if k not in LEGACY_POLICY_KEYS}
+        return data
 
 
 # --- registry/clients.yaml --------------------------------------------------
@@ -390,7 +389,7 @@ class PartLock(CamelModel):
 
 
 class ItemLock(CamelModel):
-    kind: ItemKind
+    kind: Annotated[ItemKind, BeforeValidator(_legacy_kind)]
     version: str | None = None
     upstream: Upstream
     parts: list[PartLock] = Field(default_factory=list)

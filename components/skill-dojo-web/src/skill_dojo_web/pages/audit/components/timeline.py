@@ -11,11 +11,10 @@ from skill_dojo_web.pages.audit.state import AuditState as S
 
 # event kind -> (icon, Mantine color)
 DOTS = {
-    "approval": ("check", "green"),
+    "change": ("pencil", "blue"),
     "sync": ("refresh-cw", "blue"),
-    "quarantine": ("pause", "gray"),
+    "merge": ("git-merge", "green"),
     "release": ("tag", "yellow"),
-    "promotion": ("git-pull-request-arrow", "gray"),
     "revocation": ("shield", "red"),
 }
 

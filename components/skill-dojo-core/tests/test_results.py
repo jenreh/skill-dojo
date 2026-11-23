@@ -5,30 +5,24 @@ import inspect
 import pytest
 from pydantic import BaseModel
 
-import skill_dojo_core
+import skill_dojo_core as sd
 from skill_dojo_core import (
     AdoptResult,
-    Approval,
     BrowseResult,
     BuildResult,
-    CandidateResult,
+    ChangeResult,
     Client,
     ClientsResult,
     Finding,
+    FinishResult,
     FlagsResult,
     InitResult,
     LocalAddResult,
     LockRefreshResult,
-    PolicyBlock,
-    PromoteResult,
+    MarketplaceResult,
+    PendingVersion,
     PullRequest,
     ReleaseResult,
-    Result,
-    Review,
-    ReviewActionResult,
-    ReviewEntry,
-    ReviewListResult,
-    ReviewShowResult,
     RevokeResult,
     RiskFlag,
     Source,
@@ -36,8 +30,10 @@ from skill_dojo_core import (
     SyncResult,
     UpstreamPlugin,
     ValidationReport,
-    VendorResult,
+    WorkBranch,
+    WorkStatus,
 )
+from skill_dojo_core.cache import CachedPlugin, PartRef, SourceIndex
 
 FINDING = Finding(level="error", path="plugins/x", message="drift")
 EXAMPLES: list[BaseModel] = [
@@ -50,120 +46,85 @@ EXAMPLES: list[BaseModel] = [
     AdoptResult(
         marketplace="m", items=["x"], changed=[], floating_mcp=[], possibly_vendored=[]
     ),
-    VendorResult(prefix=".agents/m", ref="main", updated=False, links=[]),
+    MarketplaceResult(prefix=".agents/m", ref="main", updated=False, links=[]),
     SourcesResult(sources=[Source(id="s", type="git", repository="o/r")]),
     UPSTREAM := UpstreamPlugin(name="p", path="plugins/p", repository="o/r"),
-    BrowseResult(source="s", commit="c" * 40, plugins=[UPSTREAM]),
+    BrowseResult(
+        source="s",
+        commit="c" * 40,
+        plugins=[UPSTREAM],
+        parts={"p": [PartRef(kind="hook", name="Stop")]},
+    ),
+    SourceIndex(
+        source="s",
+        commit="c" * 40,
+        settings="k",
+        plugins=[CachedPlugin(plugin=UPSTREAM, parts=None)],
+    ),
     FLAG := RiskFlag(kind="hook", path="hooks/x", line=1, detail="new hook"),
     PR := PullRequest(number=1, url="u", title="t", head="h", base="b"),
-    CANDIDATE := CandidateResult(
-        item="p", commit="c", branch="b", pull_request=PR, flags=[FLAG], status="opened"
+    CHANGE := ChangeResult(item="p", status="added", pin="c", flags=[FLAG]),
+    SyncResult(changes=[CHANGE], refreshed=["s"]),
+    FlagsResult(base="origin/main", flags={"p": [FLAG]}, markdown="m"),
+    PENDING := PendingVersion(
+        item="p", kind="local", status="changed", main_version="1.0.0", level="patch"
     ),
-    SyncResult(candidates=[CANDIDATE]),
-    FlagsResult(base="origin/staging", flags={"p": [FLAG]}, markdown="m"),
-    Review(user="bob", state="APPROVED", submitted_at="2026-11-21T10:00:00Z"),
-    ENTRY := ReviewEntry(pull_request=PR, item="p"),
-    ReviewListResult(entries=[ENTRY]),
-    ReviewShowResult(pull_request=PR, item="p", files=["M\tplugins/p/plugin.json"]),
-    ReviewActionResult(pull_request=PR, item="p", status="quarantined", quarantine=PR),
-    PolicyBlock(item="p", reason="risk tier is forbidden"),
-    PromoteResult(
-        status="opened",
-        branch="promote/2026-11-21",
-        pull_request=PR,
-        approvals=[
-            Approval(
-                item="p",
-                digest="a" * 64,
-                pull_request="u",
-                reviewers=["bob"],
-                approved_at="2026-11-21T10:00:00Z",
-            )
-        ],
-        items=["p"],
+    WorkBranch(name="skill-dojo/changes", status="created"),
+    WorkStatus(
+        branch="skill-dojo/changes", main="main", pull_request=PR, pending=[PENDING]
     ),
+    FinishResult(status="opened", branch="w", pull_request=PR, pending=[PENDING]),
     ReleaseResult(status="created", tag="marketplace-v2026.11.21", commit="c" * 40),
     CLIENT := Client(name="team", ref="marketplace-v2026.11.21"),
     ClientsResult(clients=[CLIENT]),
-    RevokeResult(
-        item="p",
-        action="removed",
-        branch="revoke/p",
-        pull_request=PR,
-        back_merge=PR,
-        affected_clients=[CLIENT],
-    ),
-    skill_dojo_core.ReviewDetail(
-        number=1,
-        url="u",
-        title="t",
-        item="hello",
-        head="candidate/hello/abc",
-        risk_tier="standard",
-        data_classification="internal",
-        flags=[RiskFlag(kind="mcp-server-added", path=".mcp.json", detail="d")],
-        files=[
-            skill_dojo_core.DiffFile(
-                path="a",
-                added=1,
-                lines=[skill_dojo_core.DiffLine(kind="+", number=1, text="x")],
-            )
-        ],
-    ),
-    skill_dojo_core.ReleaseOverview(
-        staging="staging",
+    RevokeResult(item="p", action="removed", affected_clients=[CLIENT]),
+    sd.ChangesOverview(status=WorkStatus(branch="w", main="main"), flags={"p": [FLAG]}),
+    sd.ReleaseOverview(
         main="main",
-        staging_head="abc",
         main_head="def",
-        commits_ahead=2,
-        items=[skill_dojo_core.PromotionItem(item="hello", reviewers=["bob"])],
-        tags=[
-            skill_dojo_core.TagInfo(tag="marketplace-v2026.11.21", commit="c", items=1)
-        ],
+        commits=[sd.CommitInfo(sha="abc", subject="skill-dojo: mirror x")],
+        tags=[sd.TagInfo(tag="marketplace-v2026.11.21", commit="c", items=1)],
     ),
-    skill_dojo_core.PreviewResult(
-        base="staging",
+    sd.CommitInfo(sha="a", subject="s"),
+    sd.PreviewResult(
+        base="main",
         base_head="abc",
-        tree=[skill_dojo_core.TreeEntry(path="plugins/", depth=0)],
-        catalogs=[
-            skill_dojo_core.CatalogPreview(path="p", changes=[], full=[], text="{}")
-        ],
+        tree=[sd.TreeEntry(path="plugins/", depth=0)],
+        catalogs=[sd.CatalogPreview(path="p", changes=[], full=[], text="{}")],
         pending=[],
         errors=0,
         warnings=[],
     ),
-    skill_dojo_core.AuditResult(
-        events=[
-            skill_dojo_core.AuditEvent(
-                kind="release", at="2026-11-21", actor="a", action="released"
-            )
-        ]
+    sd.AuditResult(
+        events=[sd.AuditEvent(kind="release", at="2026-11-21", actor="a", action="x")]
     ),
-    skill_dojo_core.RevokeTarget(item="hello", rollback_to="marketplace-v2026.11.21"),
-    skill_dojo_core.BundleInfo(
-        id="kit", parts=[skill_dojo_core.PartInfo(kind="skill", name="greet")]
+    sd.RevokeTarget(item="hello", rollback_to="marketplace-v2026.11.21"),
+    sd.PluginInfo(
+        id="kit",
+        kind="local",
+        path="plugins/kit",
+        parts=[sd.PartInfo(kind="skill", name="greet")],
     ),
-    skill_dojo_core.PartInfo(kind="agent", name="helper"),
-    skill_dojo_core.AuditEvent(kind="sync", at="", actor="a", action="opened"),
-    skill_dojo_core.TreeEntry(path="plugins/hello/", depth=1, status="A"),
-    skill_dojo_core.DiffLine(kind="…", text=""),
-    skill_dojo_core.DiffFile(path="b"),
-    skill_dojo_core.PromotionItem(item="kit", kind="bundle"),
-    skill_dojo_core.TagInfo(tag="marketplace-v2026.11.21.2", commit="c"),
-    skill_dojo_core.CatalogPreview(path="q", changes=[], full=[], text=""),
-    skill_dojo_core.RevokePreview(targets=[]),
-    skill_dojo_core.BundlesOverview(local=["tools"]),
-    skill_dojo_core.PluginParts(parts=[]),
+    sd.PartInfo(kind="agent", name="helper"),
+    sd.AuditEvent(kind="sync", at="", actor="a", action="sync"),
+    sd.TreeEntry(path="plugins/hello/", depth=1, status="A"),
+    sd.DiffLine(kind="…", text=""),
+    sd.DiffFile(path="b"),
+    sd.TagInfo(tag="marketplace-v2026.11.21.2", commit="c"),
+    sd.CatalogPreview(path="q", changes=[], full=[], text=""),
+    sd.RevokePreview(targets=[]),
+    sd.PluginsOverview(local=["tools"]),
+    sd.PluginParts(parts=[]),
 ]
 
 
 def exported_results() -> set[type[BaseModel]]:
     return {
         obj
-        for name in skill_dojo_core.__all__
-        if inspect.isclass(obj := getattr(skill_dojo_core, name))
-        and issubclass(obj, Result)
-        and obj is not Result
+        for name in sd.__all__
+        if inspect.isclass(obj := getattr(sd, name))
+        and issubclass(obj, sd.Result)
+        and obj is not sd.Result
     }
 
 

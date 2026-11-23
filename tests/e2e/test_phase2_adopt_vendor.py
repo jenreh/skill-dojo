@@ -1,4 +1,4 @@
-"""Phase 2 end to end: adopt an existing marketplace, vendor it into a consumer."""
+"""Phase 2 end to end: adopt an existing marketplace, add it to a consumer repo."""
 
 import json
 from collections.abc import Callable
@@ -15,8 +15,9 @@ from skill_dojo_core import (
     adopt,
     build,
     lock_refresh,
+    marketplace_add,
+    marketplace_update,
     validate,
-    vendor,
 )
 from skill_dojo_core.catalogs import compact_dumps
 from tests.support.fixture_repos import FixtureRepos, git, skill_md
@@ -179,7 +180,7 @@ def test_adopt_errors(fixture_repos: FixtureRepos, make_context: MakeContext) ->
         adopt(make_context(repo), tool=PIN)
 
 
-def test_vendor_add_update_and_refusals(
+def test_marketplace_add_update_and_refusals(
     fixture_repos: FixtureRepos, make_context: MakeContext
 ) -> None:
     market = fixture_repos.create(
@@ -189,37 +190,37 @@ def test_vendor_add_update_and_refusals(
     market.tag("marketplace-v2026.11.21")
     _, consumer = fixture_repos.curated("consumer")
     ctx = make_context(consumer)
-    result = vendor(ctx, market.url, ref="marketplace-v2026.11.21")
+    result = marketplace_add(ctx, market.url, ref="marketplace-v2026.11.21")
     assert result.prefix == ".agents/market"
     assert sorted(result.links) == [".agents/skills", ".claude/skills"]
     assert (consumer / ".claude/skills/greet/SKILL.md").is_file()
     assert (consumer / ".agents/skills/greet/SKILL.md").is_file()
     assert git(consumer, "status", "--porcelain") == ""
-    with pytest.raises(ConflictError, match="--update"):
-        vendor(ctx, market.url)
+    with pytest.raises(ConflictError, match="marketplace update"):
+        marketplace_add(ctx, market.url)
     market.commit({"skills/new/SKILL.md": skill_md("new", "New. Use when new.")})
-    updated = vendor(ctx, market.url, ref="main", update=True)
+    updated = marketplace_update(ctx, market.url, ref="main")
     assert updated.links == []
     assert (consumer / ".agents/market/skills/new/SKILL.md").is_file()
     (consumer / "README.md").write_text("dirty\n")
     with pytest.raises(ConflictError, match="dirty"):
-        vendor(ctx, market.url, update=True)
+        marketplace_update(ctx, market.url)
 
 
-def test_vendor_input_checks(
+def test_marketplace_input_checks(
     fixture_repos: FixtureRepos, make_context: MakeContext
 ) -> None:
     _, consumer = fixture_repos.curated("consumer2")
     ctx = make_context(consumer)
     with pytest.raises(InvalidInputError):
-        vendor(ctx, "https://x.invalid/a.git", ref="--upload-pack=evil")
+        marketplace_add(ctx, "https://x.invalid/a.git", ref="--upload-pack=evil")
     for url in ("--evil", "ext::sh -c touch% /tmp/pwned", "/abs/path", "http://x/y"):
         with pytest.raises(InvalidInputError, match="URL"):
-            vendor(ctx, url)
+            marketplace_add(ctx, url)
     with pytest.raises(InvalidInputError):
-        vendor(ctx, "https://x.invalid/a.git", name="../up")
-    with pytest.raises(ConflictError, match="vendor it first"):
-        vendor(ctx, "https://x.invalid/a.git", update=True)
+        marketplace_add(ctx, "https://x.invalid/a.git", name="../up")
+    with pytest.raises(ConflictError, match="marketplace add"):
+        marketplace_update(ctx, "https://x.invalid/a.git")
 
 
 def test_adopt_fails_before_writing(
@@ -238,7 +239,7 @@ def test_adopt_fails_before_writing(
     assert not (repo / "registry").exists()
 
 
-def test_vendor_checks_links_before_the_subtree(
+def test_marketplace_checks_links_before_the_subtree(
     fixture_repos: FixtureRepos, make_context: MakeContext
 ) -> None:
     market = fixture_repos.create("mk", {"skills/a/SKILL.md": "x\n"})
@@ -247,10 +248,10 @@ def test_vendor_checks_links_before_the_subtree(
     (consumer / ".claude/skills/own.md").write_text("mine\n")
     remote_head = git(consumer, "rev-parse", "HEAD")
     with pytest.raises(ConflictError, match="dirty"):
-        vendor(make_context(consumer), market.url)
+        marketplace_add(make_context(consumer), market.url)
     git(consumer, "add", ".claude")
     git(consumer, "commit", "-q", "-m", "own skills")
     with pytest.raises(ConflictError, match="not a link"):
-        vendor(make_context(consumer), market.url)
+        marketplace_add(make_context(consumer), market.url)
     assert not (consumer / ".agents/mk").exists()
     assert git(consumer, "rev-list", "--count", f"{remote_head}..HEAD") == "1"

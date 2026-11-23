@@ -55,7 +55,13 @@ else:
 @contextmanager
 def repo_lock(repo: Path, timeout: float = 30.0) -> Generator[None]:
     """Hold the repo's lock file for the duration of the block."""
-    path = lock_path(repo)
+    with file_lock(lock_path(repo), timeout):
+        yield
+
+
+@contextmanager
+def file_lock(path: Path, timeout: float = 30.0) -> Generator[None]:
+    """Hold an exclusive lock on ``path`` (created when missing)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:

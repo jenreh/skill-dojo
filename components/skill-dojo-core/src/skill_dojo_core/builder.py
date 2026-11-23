@@ -20,20 +20,34 @@ from skill_dojo_core import (
     hashing,
     jsontext,
     metadata,
+    versions,
     workflows,
 )
 from skill_dojo_core.errors import InvalidInputError
 from skill_dojo_core.models import (
-    Approval,
     ChannelPolicy,
+    FileLock,
     Item,
     ItemKind,
     ItemLock,
+    LockFile,
     RegistryConfig,
     ToolPin,
+    Upstream,
 )
 from skill_dojo_core.overlay import Overlay
-from skill_dojo_core.registry import LOCK, REGISTRY_DIR, Registry, render_lock
+from skill_dojo_core.registry import (
+    ITEMS,
+    LEGACY_APPROVALS,
+    LOCK,
+    POLICY,
+    REGISTRY_DIR,
+    Registry,
+    legacy_files,
+    model_at,
+    render_lock,
+    yaml_text,
+)
 
 log = logging.getLogger(__name__)
 
@@ -114,12 +128,10 @@ def provenance(  # noqa: PLR0917
     lock: ItemLock,
     manifest: dict[str, Any],
     skill: str | None = None,
-    approval: Approval | None = None,
 ) -> metadata.Provenance:
     """The provenance stamped into an item's manifest or one of its skills.
 
-    A bundle skill carries the upstream of its part; ``approval`` (from
-    ``approvals.yaml``, matching the locked content) adds the approval facts.
+    A skill that is a part of a local plugin carries the upstream of its part.
     """
     upstream = lock.upstream
     source_path = f"{upstream.path}/skills/{skill}" if skill else None
@@ -147,7 +159,6 @@ def provenance(  # noqa: PLR0917
         data_classification=item.data_classification
         or policy.default_data_classification,
         allowed_tools=item.allowed_tools or None,
-        supported_channels=[c.value for c in item.supported_channels],
         deprecation_replacement=item.deprecation.replacement
         if item.deprecation
         else None,
@@ -155,16 +166,7 @@ def provenance(  # noqa: PLR0917
         if item.deprecation
         else None,
         parts=[p.model_dump(by_alias=True) for p in lock.parts] or None,
-        approved_version=approval.version if approval else None,
-        approved_by=",".join(approval.reviewers) if approval else None,
-        approved_at=approval.approved_at if approval else None,
-        review_evidence=approval.pull_request if approval else None,
     )
-
-
-def approval_for(reg: Registry, item: Item) -> Approval | None:
-    lock = reg.lock.items.get(item.id)
-    return reg.approvals.for_digest(item.id, lock.tree_sha256) if lock else None
 
 
 @dataclass
@@ -355,7 +357,6 @@ class PluginBuild:
             self.item,
             self.lock,
             self.manifest_data(),
-            approval=approval_for(self.reg, self.item),
         )
         text = self.overlay.read_text(full) or ""
         self.overlay.write(
@@ -385,7 +386,6 @@ class PluginBuild:
                     self.lock,
                     manifest,
                     skill=name,
-                    approval=approval_for(self.reg, self.item),
                 )
                 text = metadata.stamped_skill(text, self.reg.config.namespace, prov)
                 self.overlay.write(skill_md, text)
@@ -473,14 +473,135 @@ def flat_skills(reg: Registry, overlay: Overlay) -> None:
         overlay.link(f"{FLAT_SKILLS_DIR}/{name}", target)
 
 
+def main_ref(reg: Registry) -> str | None:
+    """``origin/<main>`` when this checkout has it (CI may not)."""
+    ref = f"origin/{reg.config.main_branch}"
+    return ref if git.ref_exists(reg.repo, f"refs/remotes/{ref}") else None
+
+
+def _head_or_zero(repo: Path) -> str:
+    head = git.run(repo, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False)
+    return head or "0" * 40
+
+
+def local_files(
+    reg: Registry, overlay: Overlay, item: Item, exclude: set[str]
+) -> dict[str, FileLock]:
+    """Lock entries of a local plugin's files, as they are with ``overlay``."""
+    root = reg.repo / plugin_dir(item.id)
+    ns = reg.config.namespace
+    files = hashing.hash_tree(root, ns, exclude=exclude)
+    for rel, old in list(files.items()):
+        pending = overlay.pending.get(f"{plugin_dir(item.id)}/{rel}")
+        if isinstance(pending, str | bytes) and old.mode != "120000":
+            data = pending.encode() if isinstance(pending, str) else pending
+            files[rel] = hashing.file_lock_for(rel, data, old.mode, ns)
+    return files
+
+
+def refresh_local(reg: Registry, overlay: Overlay, item: Item) -> None:
+    """Lock the local plugin's current files (new skills, edits, version bumps)."""
+    old = reg.lock.items.get(item.id)
+    exclude = set(old.generated) if old else set()
+    files = local_files(reg, overlay, item, exclude)
+    tree = hashing.tree_sha256(files)
+    if old is not None and not hashing.drift(old.files, files):
+        return  # stamps alone are no change (normalized hashes)
+    reg.lock.items[item.id] = ItemLock(
+        kind=ItemKind.LOCAL,
+        version=old.version if old else None,
+        upstream=old.upstream.model_copy(
+            update={"commit": _head_or_zero(reg.repo), "ref": None}
+        )
+        if old
+        else Upstream(
+            repository=reg.config.repository or reg.config.name,
+            commit=_head_or_zero(reg.repo),
+            path=plugin_dir(item.id),
+        ),
+        parts=old.parts if old else [],
+        tree_sha256=tree,
+        files=files,
+        generated=sorted(exclude),
+    )
+
+
+def version_wanted(
+    reg: Registry, item: Item, current: str | None, base: str, base_lock: LockFile
+) -> str | None:
+    """The version a changed local plugin needs, or None when it is fine."""
+    lock = reg.lock.items.get(item.id)
+    on_main = base_lock.items.get(item.id)
+    if on_main is None:
+        return None if current else versions.FIRST_VERSION
+    if lock is not None and lock.tree_sha256 == on_main.tree_sha256:
+        return None
+    main_version = manifest_version_at(reg.repo, base, item.id)
+    if versions.is_greater(current, main_version):
+        return None
+    if main_version is not None and versions.parse(main_version) is None:
+        log.warning("Not bumping %s: version %s is not semver", item.id, main_version)
+        return None
+    return versions.bump(main_version)
+
+
+def set_manifest_version(pb: PluginBuild, version: str) -> None:
+    """Write ``version`` into every real manifest of the plugin (in the overlay)."""
+    for path in pb.real_manifests() or [pb.source_manifest()]:
+        full = pb.rel(path)
+        text = pb.overlay.read_text(full)
+        if text is not None:
+            pb.overlay.write(full, versions.with_version(text, version))
+
+
+def bump_local(
+    reg: Registry,
+    overlay: Overlay,
+    item: Item,
+    main: tuple[str, LockFile] | None,
+) -> None:
+    """Refresh the lock and give a changed local plugin its version bump."""
+    refresh_local(reg, overlay, item)
+    if main is None:
+        return
+    base, base_lock = main
+    pb = PluginBuild(reg, overlay, item)
+    current = version_of(overlay.read_text(pb.rel(pb.source_manifest())))
+    wanted = version_wanted(reg, item, current, base, base_lock)
+    if wanted is not None:
+        log.info("Version of %s: %s -> %s", item.id, current, wanted)
+        set_manifest_version(pb, wanted)
+        refresh_local(reg, overlay, item)
+
+
+def migrate(reg: Registry, overlay: Overlay) -> None:
+    """Rewrite rev. 1 registry files (``bundle`` kind, staging channels, approvals)."""
+    legacy = legacy_files(reg.repo)
+    if ITEMS in legacy:
+        overlay.write(
+            f"{REGISTRY_DIR}/{ITEMS}", yaml_text(reg.repo, ITEMS, reg.items)[0]
+        )
+    if POLICY in legacy:
+        overlay.write(
+            f"{REGISTRY_DIR}/{POLICY}", yaml_text(reg.repo, POLICY, reg.policy)[0]
+        )
+    if LEGACY_APPROVALS in legacy:
+        overlay.remove(f"{REGISTRY_DIR}/{LEGACY_APPROVALS}")
+
+
 def plan(reg: Registry) -> Overlay:
     """Every change ``build`` would make, without touching the disk."""
     overlay = Overlay(reg.repo)
+    migrate(reg, overlay)
+    base = main_ref(reg)
+    main = (base, model_at(reg.repo, base, LOCK, LockFile)) if base else None
     plugins: list[catalogs.CatalogPlugin] = []
     for item in sorted(reg.items.items, key=lambda i: i.id):
         if not (reg.repo / plugin_dir(item.id)).is_dir():
             log.warning("Item %s has no %s directory", item.id, plugin_dir(item.id))
             continue
+        if item.kind is ItemKind.LOCAL:
+            bump_local(reg, overlay, item, main)
         builder = PluginBuild(reg, overlay, item)
         builder.run()
         plugins.append(catalogs.CatalogPlugin(item, builder.manifest_data()))
@@ -492,8 +613,12 @@ def plan(reg: Registry) -> Overlay:
     overlay.write(catalogs.AGENTS_CATALOG, catalogs.agents_catalog(reg.config, plugins))
     overlay.write(catalogs.CLAUDE_CATALOG, catalogs.claude_catalog(reg.config, plugins))
     pin = reg.config.tool
+    main = reg.config.main_branch
     write_workflow(
-        overlay, pin, workflows.VALIDATE_WORKFLOW, workflows.validate_workflow
+        overlay,
+        pin,
+        workflows.VALIDATE_WORKFLOW,
+        lambda p: workflows.validate_workflow(p, main),
     )
     write_workflow(overlay, pin, workflows.SYNC_WORKFLOW, workflows.sync_workflow)
     overlay.write(f"{REGISTRY_DIR}/{LOCK}", render_lock(reg.lock))

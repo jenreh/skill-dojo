@@ -24,15 +24,16 @@ def tool_command(pin: ToolPin) -> str:
     )
 
 
-def validate_workflow(pin: ToolPin) -> str:
+def validate_workflow(pin: ToolPin, main: str = "main") -> str:
+    """Validate pushes to main and PRs into it; post risk flags on those PRs."""
     cmd = tool_command(pin)
     return f"""name: Validate marketplace
 
 on:
   pull_request:
-    branches: [main, staging]
+    branches: [{main}]
   push:
-    branches: [main, staging]
+    branches: [{main}]
   workflow_dispatch:
 
 permissions:
@@ -61,7 +62,7 @@ jobs:
 
   flags:
     name: Risk flags
-    if: github.event_name == 'pull_request' && github.base_ref == 'staging'
+    if: github.event_name == 'pull_request' && github.base_ref == '{main}'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -94,11 +95,12 @@ jobs:
 
 
 def sync_workflow(pin: ToolPin) -> str:
-    """Scheduled sync: one candidate PR into staging per moved upstream.
+    """Scheduled sync: upstream updates as commits on the work branch, then
+    ``finish`` pushes it and opens or updates the one PR into main.
 
     PRs opened with the default GITHUB_TOKEN do not trigger other workflows, so
     set a SKILL_DOJO_TOKEN secret (contents + pull requests write) to get the
-    validate checks on candidate PRs.
+    validate checks on the work-branch PR.
     """
     cmd = tool_command(pin)
     return f"""name: Sync upstream
@@ -122,7 +124,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Open candidate PRs for upstream changes
+    name: Commit upstream changes to the work branch
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -151,4 +153,9 @@ jobs:
           else
             {cmd} sync
           fi
+
+      - name: Push the work branch and update its PR
+        env:
+          GH_TOKEN: ${{{{ secrets.SKILL_DOJO_TOKEN || github.token }}}}
+        run: {cmd} finish
 """

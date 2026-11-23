@@ -1,43 +1,58 @@
-"""``sync``: a candidate PR for every mirror and bundle whose upstream moved."""
+"""``sync``: upstream updates as commits on the work branch.
 
-from skill_dojo_core.branches import QUARANTINE, base_branch, remote_start
-from skill_dojo_core.commands.bundles import refresh_bundle
-from skill_dojo_core.commands.candidates import CandidateResult, make_candidate
+Every source's cached catalog is fetched again first. Then each mirror, and
+each local plugin with parts, is fetched at its source's ref; one that moved
+becomes one commit. Quarantined items are skipped. Running it twice changes
+nothing the second time.
+"""
+
+import logging
+
+from skill_dojo_core.branches import commit_work, editing
+from skill_dojo_core.commands.mirror import ChangeResult, update_mirror
+from skill_dojo_core.commands.plugins import refresh_parts
+from skill_dojo_core.commands.sources import refresh_sources
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import NotFoundError
-from skill_dojo_core.models import ItemKind, ItemsFile
-from skill_dojo_core.registry import ITEMS, Registry, model_at
+from skill_dojo_core.models import Item, ItemKind
+from skill_dojo_core.registry import Registry
 from skill_dojo_core.results import Result
+
+log = logging.getLogger(__name__)
+
+CHANGED = frozenset({"added", "updated"})
 
 
 class SyncResult(Result):
-    candidates: list[CandidateResult]
+    changes: list[ChangeResult]
+    refreshed: list[str] = []
+
+
+def _syncable(item: Item) -> bool:
+    return item.kind is ItemKind.MIRROR or bool(item.parts)
 
 
 def sync(ctx: Context, *, item: str | None = None) -> SyncResult:
-    base = base_branch(Registry.load(ctx.repo))
-    staged = model_at(ctx.repo, remote_start(ctx.repo, base), ITEMS, ItemsFile)
-    tracked = {
-        i.id: i.kind
-        for i in staged.items
-        if i.kind in {ItemKind.MIRROR, ItemKind.BUNDLE}
-    }
-    if item is not None:
-        if item not in tracked:
-            raise NotFoundError(f"no mirror or bundle '{item}' on {base}")
-        tracked = {item: tracked[item]}
-    # A quarantine waiting in its own PR already stops new candidates.
-    waiting = {
-        pr.head.removeprefix(QUARANTINE)
-        for pr in ctx.github.list_open_pull_requests(base)
-        if pr.head.startswith(QUARANTINE)
-    }
-    results = [
-        CandidateResult(item=i, commit="", branch="", status="quarantined")
-        if i in waiting
-        else make_candidate(ctx, None, None, i, new=False)
-        if kind is ItemKind.MIRROR
-        else refresh_bundle(ctx, i)
-        for i, kind in tracked.items()
-    ]
-    return SyncResult(candidates=results)
+    with editing(ctx):
+        refreshed = refresh_sources(ctx)
+        reg = Registry.load(ctx.repo)
+        targets = [i for i in reg.items.items if _syncable(i)]
+        if item is not None:
+            targets = [i for i in targets if i.id == item]
+            if not targets:
+                raise NotFoundError(f"no mirror or plugin with parts '{item}'")
+        results = []
+        for target in targets:
+            result = (
+                update_mirror(ctx, target.id)
+                if target.kind is ItemKind.MIRROR
+                else refresh_parts(ctx, target.id)
+            )
+            if result.status in CHANGED:
+                result = result.model_copy(
+                    update={"commit": commit_work(ctx, f"sync {target.id}")}
+                )
+                ctx.report(f"Updated {target.id}")
+            results.append(result)
+    log.info("Sync: %d item(s) changed", sum(r.commit is not None for r in results))
+    return SyncResult(changes=results, refreshed=refreshed)

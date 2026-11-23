@@ -1,6 +1,8 @@
 # Curated Agent Plugin Marketplace Tool: Design
 
-Date: 2026-11-21. Status: approved. Next step: the implementation plan.
+Date: 2026-11-22 (rev. 2). Status: approved. Rev. 2 replaces staging, candidate PRs,
+approvals and promote with one work branch, automatic plugin versions and a manual
+release.
 
 ## Where things live (decided by the user)
 
@@ -34,38 +36,46 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 ## Goals
 
 1. Add upstream sources (Agent Plugins marketplaces, plain git repos, the MCP Registry),
-   browse what they offer, and select plugins, skills, agents and MCP servers.
-2. Three kinds of items, **all behind the same gate** (decided by the user):
+   browse what they offer from a local cache, and select plugins, skills, agents, MCP
+   servers and hooks.
+2. Two kinds of items, **all behind the same gate** (decided by the user):
    - **Mirror**: copy one upstream plugin as it is.
-   - **Bundle**: build a new plugin out of skills, agents or MCP servers taken from one or
-     more upstream plugins. A bundle may also include local parts.
-   - **Local**: the team's own skills and plugins (most jenreh plugins). A change to them
-     also goes through a candidate PR into `staging`, with risk flags, a `lock.json` entry
-     (the content hash, with `upstreamCommit` = the repo's own commit) and the same
-     validation. The MCP pinning rule applies too. Today's unpinned
-     `npx -y @upstash/context7-mcp` in `jenreh-core/.mcp.json` must be pinned when the
-     jenreh repo is adopted. `validate` fails on any folder under `plugins/` that the
-     registry does not track.
+   - **Local**: the team's own plugin. It holds hand-written files and, optionally,
+     **parts** (a skill, an agent, an MCP server or a hook) copied from one or more
+     upstream plugins. Most jenreh plugins are local plugins without parts. A change to a
+     local plugin goes through the same work branch and PR as any other change, with
+     risk flags, a `lock.json` entry (the content hash, with `upstreamCommit` = the
+     repo's own commit) and the same validation. The MCP pinning rule applies too.
+     Today's unpinned `npx -y @upstash/context7-mcp` in `jenreh-core/.mcp.json` must be
+     pinned when the jenreh repo is adopted. `validate` fails on any folder under
+     `plugins/` that the registry does not track.
 3. **Pin every item** to an exact upstream commit, with a recorded archive SHA-256.
-   Nothing changes until someone approves it.
-4. **Keep things in sync through PRs.** A scheduled GitHub Action checks upstream. Each new
-   upstream version becomes a *candidate*, never an automatic update. The Action opens a
-   PR into `staging` that contains the diff plus **automatic risk flags**.
-5. **Releases.** You promote approved changes from `staging` to `main` and create an
-   immutable tag (`marketplace-vYYYY.MM.DD[.N]`). Clients import `main` or a pinned tag.
+   Nothing reaches `main` until someone approves it.
+4. **One work branch.** Every change (a new mirror, new parts, a new plugin, an upstream
+   update, a revocation) is a commit on one branch in the admin's checkout
+   (`skill-dojo/changes` by default). A scheduled GitHub Action checks upstream and
+   writes each new upstream version as a commit on the same branch, never as an
+   automatic update of `main`. **One PR into `main`** carries the diff plus
+   **automatic risk flags**. Merging it is the approval.
+5. **Releases.** After the merge, an admin creates a release (CLI or UI): an immutable tag
+   (`marketplace-vYYYY.MM.DD[.N]`) plus a GitHub Release with notes. Clients import
+   `main` or a pinned tag.
 6. **Publish to several clients.** Agent Plugins 1.0 is the canonical format, written to
    `.agents/plugins/marketplace.json` (ChatGPT, Codex, Copilot). From the same source the
    tool also generates the `.claude-plugin/` manifests for Claude Code.
 7. **A CLI** manages everything, and `serve` starts a **local web UI** for the same tasks.
-8. **Audit and revocation.** Every sync, approval, promotion and revocation can be traced
-   in git. A hand-kept list of clients shows who must be warned when something is revoked.
-
+8. **Audit and revocation.** Every sync, change, merge, release and revocation can be
+   traced in git. A hand-kept list of clients shows who must be warned when something is
+   revoked.
 9. **The MCP Registry is a v1 source** (decided by the user). Browse the official MCP
    Registry. A server entry (npm, PyPI or OCI package) is pinned to an exact package
    version or image digest, and the pinned value is recorded as its `upstreamCommit` /
    `sourceDigest`. It becomes a generated wrapper plugin (one `.mcp.json` plus a
-   manifest) or a part inside a bundle. Updates are detected by new registry versions and
-   go through the same candidate PR.
+   manifest) or a part inside a local plugin. Updates are detected by new registry
+   versions and land on the work branch like every other upstream change.
+10. **Versions are kept by the tool.** A changed local plugin gets a patch bump
+    automatically. The admin can choose minor, major or an exact version instead. Mirrors
+    keep the upstream version.
 
 ## Non-goals (v1)
 
@@ -77,6 +87,8 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 - A full automated security verdict (an LLM or SAST judging the code). v1 gives risk flags
   and humans decide.
 - Editing mirrored content by hand (see "Calls made").
+- Per-item approvals, several reviewers per item and release channels (beta, stable).
+- An automatic release when the PR is merged, and one semver for the whole registry.
 
 ## Anti-goals (a failure even if it works)
 
@@ -84,7 +96,8 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
   Claude manifests, readable YAML, normal git history. Someone must be able to hand-edit it,
   or stop using the tool entirely, and still have a working marketplace. No hidden state, no
   database, no custom format that only this tool can read.
-- Unapproved content reaching `main` or a tag through any path.
+- Unapproved content reaching `main` or a tag through any path. Content reaches `main`
+  only through the reviewed PR, and the repo's branch protection enforces the review.
 - Setup that takes more effort than copying skills by hand did.
 
 ## Constraints
@@ -101,8 +114,19 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 
 - Stack: **Python 3.14, a Typer CLI** (installed with `uv tool install`), and **Reflex +
   appkit-mantine** for the web UI. `serve` starts the UI.
-- Sync: a scheduled GitHub Action opens a PR. Merging the PR is the approval.
+- Sync: a scheduled GitHub Action writes upstream updates as commits on the work branch
+  and opens or updates the one PR into `main`. Merging the PR is the approval.
 - A reviewer sees the diff plus risk flags.
+- The work branch lives in the admin's own checkout. When it has been merged, the next
+  change starts a fresh one from `main`.
+- Versions: an automatic patch bump, a manual override, and a "finish" step that lists
+  every changed plugin with a major, minor or patch choice. Bumps land in the PR, never as
+  a commit on `main` after the merge.
+- Release is manual (`skill-dojo release` or a button in the UI).
+- `local` and `bundle` are one kind, `local`. Kinds left: `mirror` and `local`.
+- Revocation is a normal change on the work branch.
+- Upstream catalogs are cached in the curated repo in a local folder that git ignores,
+  so browsing is fast. `sync` updates the cache.
 - Clients are a hand-kept `registry/clients.yaml`, edited through the UI.
 - The UI is local only in v1.
 - Output: Agent Plugins plus Claude Code manifests.
@@ -121,13 +145,13 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 │   ├── .claude-plugin/plugin.json       # generated (or symlink, as the jenreh repo does)
 │   ├── skills/ .mcp.json commands/ hooks/ agents/ assets/ ...
 ├── registry/
-│   ├── config.yaml           # namespace, pinned skill-dojo version, layout and branding options
+│   ├── config.yaml           # namespace, pinned skill-dojo version, work_branch, layout and branding options
 │   ├── sources.yaml          # upstream sources, refs, allow-lists, schedule
-│   ├── items.yaml            # what is mirrored/bundled, from where, pinned at what
-│   ├── approvals.yaml        # approval records (reviewer, PR, policy result, time)
-│   ├── channel-policy.yaml   # rules for staging and stable
+│   ├── items.yaml            # what is mirrored or local, from where, pinned at what
+│   ├── channel-policy.yaml   # default risk tier and data classification
 │   ├── clients.yaml          # hand-kept: workspace or client -> ref/tag in use
 │   └── lock.json             # provenance: upstream repo, commit, path, sha256 per file/archive
+├── .skill-dojo/cache/        # local only: cached upstream catalogs and checkouts (ignores itself)
 └── .github/workflows/
     ├── validate-marketplace.yml
     └── sync-upstream.yml
@@ -136,6 +160,11 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 Every `registry/` file is readable and editable by hand. The tool rebuilds both
 marketplace catalogs from `plugins/` and `registry/`, so a hand edit followed by
 `<tool> build` gives a consistent result.
+
+`.skill-dojo/cache/` holds one folder per source and commit
+(`sources/<id>/<commit>/` with the checkout and an `index.json` of the plugins and their
+parts). It contains its own `.gitignore` with `*`, so git never sees it and the repo's
+own `.gitignore` is not touched. Deleting the folder only costs a fetch.
 
 ### Catalog entry (example)
 
@@ -164,9 +193,10 @@ sources:
 
 ## Provenance metadata in skills and plugins (decided by the user)
 
-Every vendored skill and plugin carries its own origin, license and approval facts inside
-its standard files. Then the facts travel with the content even when someone copies a
-folder out of the repo, and they are readable without the tool (anti-lock-in).
+Every vendored skill and plugin carries its own origin and license facts inside its
+standard files. Then the facts travel with the content even when someone copies a
+folder out of the repo, and they are readable without the tool (anti-lock-in). The
+approval itself is the merged PR in git history; it is not stamped into the files.
 
 **Skills: `SKILL.md` frontmatter `metadata`.** It is a flat map of string keys to string
 values. Values are always strings: no nested objects, arrays, booleans or numbers. Every
@@ -186,8 +216,6 @@ metadata:
   acme.registry/source-path: plugins/grafana-observability/skills/github-pr-reviewer
   acme.registry/source-commit: 8f2c1a9...
   acme.registry/source-license: Apache-2.0
-  acme.registry/approved-by: jens
-  acme.registry/approved-at: 2026-11-21T10:00:00Z
   acme.registry/risk-tier: standard
   acme.registry/data-classification: internal
 ---
@@ -208,12 +236,8 @@ extension key. Here, JSON types such as arrays are allowed.
     "upstreamCommit": "8f2c1a9...",
     "upstreamVersion": "1.4.2",
     "upstreamLicense": "Apache-2.0",
-    "approvedBy": "jens",
-    "approvedAt": "2026-11-21T10:00:00Z",
     "riskTier": "standard",
-    "dataClassification": "internal",
-    "reviewEvidence": "https://github.com/<org>/<repo>/pull/123",
-    "supportedChannels": ["stable", "internal"]
+    "dataClassification": "internal"
   },
   "com.openai": { "...": "existing client extensions are kept untouched" }
 }
@@ -225,57 +249,48 @@ under `extensions.<ns>`, and kebab-case string keys under the skill `metadata` p
 | Field | Purpose |
 |---|---|
 | `registryId` | Stable internal identity, e.g. `acme:github-pr-reviewer` |
-| `kind` | `mirror`, `bundle` or `local` |
+| `kind` | `mirror` or `local` |
 | `upstreamMarketplace` | Original source marketplace, repository or MCP Registry |
 | `upstreamPlugin` | Original plugin, skill or server identifier |
 | `upstreamRef` | Upstream tag, release or branch that was tracked |
 | `upstreamCommit` | Exact source revision (or package version / image digest for MCP Registry) |
 | `upstreamVersion`, `upstreamLicense` | As declared upstream |
 | `sourceDigest` | SHA-256 of the vendored plugin or skill content |
-| `approvedVersion` | The version approved for a channel |
-| `approvedBy` / `approvedAt` | Human approval evidence |
 | `riskTier` | `low`, `standard`, `restricted` or `forbidden` |
 | `dataClassification` | `public`, `internal`, `confidential` (list configurable) |
 | `allowedTools` | Explicit tool and network permissions |
-| `reviewEvidence` | Link to the candidate PR, scan results or approval ticket |
-| `supportedChannels` | Channels the item may be published in (`dev`, `beta`, `stable`, `lts`) |
 | `deprecation` | Replacement and removal date, when it applies |
 
-In skill `metadata`, list values (`allowed-tools`, `supported-channels`) are
-comma-separated strings, and `deprecation` is two keys (`deprecation-replacement`,
-`deprecation-removal-date`), because values must be strings. The portable set lives in
-the files. The full record lives in the registry, as described below.
+In skill `metadata`, the list value `allowed-tools` is a comma-separated string, and
+`deprecation` is two keys (`deprecation-replacement`, `deprecation-removal-date`), because
+values must be strings. The portable set lives in the files. The full record lives in the
+registry, as described below.
 
 **Where to store what.** The paste says "registry database". Here that is the repo
 itself, because there is no database:
 
 | Data | In the plugin or skill folder | In the registry (this repo) |
 |---|---|---|
-| Identity, source, version, approval status | Yes, the field set above | `items.yaml`, `lock.json`, `approvals.yaml` |
-| Full review history, reviewer comments | No | The candidate and promote PRs (their reviews and comments) |
-| Scan reports, risk-flag output, large fixtures | No | PR comment plus GitHub Actions artifact, linked from `reviewEvidence` |
+| Identity, source, version | Yes, the field set above | `items.yaml`, `lock.json` |
+| Approval, review history, reviewer comments | No | The merged work-branch PR (its reviews and comments) |
+| Scan reports, risk-flag output, large fixtures | No | PR body and comment, GitHub Actions artifact |
 | Secrets, API keys, tenant config | Never | Never in the repo: GitHub Actions secrets or local env |
-| Org policy, channel promotion rules | No | `registry/channel-policy.yaml` |
+| Org policy defaults | No | `registry/channel-policy.yaml` |
 | Installation state per workspace | No | `registry/clients.yaml` (hand-kept) |
 
-**Policy effects.** `riskTier: forbidden` blocks promotion. `restricted` needs the number
-of reviewers set in `channel-policy.yaml`. An item can only be promoted into a channel
-listed in its `supportedChannels`. A changed `allowedTools`, or an upstream metadata
-change on its own, is a risk flag and makes a new candidate.
+**Policy effects.** `riskTier: forbidden` fails `validate`, so such an item cannot reach
+`main`. A changed `allowedTools`, or an upstream metadata change on its own, is a risk
+flag.
 
-**Channels (my call).** v1 has two channels as branches: `staging` (= `beta`) and `main`
-(= `stable`). `dev` and `lts` are allowed values but have no branch in v1. `lts` can come
-later as a long-lived tag series.
-
-For a **bundle**, the plugin extension has `"kind": "bundle"` and a `parts` array. It has
-one entry per included skill, agent or MCP server, each with its own upstream marketplace,
-plugin, path, commit and license. Each included skill also carries its own `metadata` as
-above.
+For a **local plugin with parts**, the plugin extension has `"kind": "local"` and a
+`parts` array. It has one entry per included skill, agent, MCP server or hook, each with
+its own upstream marketplace, plugin, path, commit and license. Each included skill also
+carries its own `metadata` as above.
 
 Rules:
-- **Namespace is configurable per curated repo** (`registry/channel-policy.yaml` or a
-  `registry/config.yaml`), for example `acme.registry/` for skills and `com.acme.registry`
-  for plugins. Default is derived from the marketplace name.
+- **Namespace is configurable per curated repo** (`registry/config.yaml`), for example
+  `acme.registry/` for skills and `com.acme.registry` for plugins. Default is derived
+  from the marketplace name.
 - **Merge, never replace.** Upstream frontmatter, upstream `metadata` keys and other
   `extensions` (for example `com.openai`) are kept as they are. The tool only adds or
   overwrites keys in its own namespace.
@@ -283,10 +298,9 @@ Rules:
   file is vendored into the plugin (`licenses/`, as the jenreh repo already does). A
   missing upstream license, or one that changed, is a risk flag.
 - **When fields are written.** Upstream fields (`source-*`, `upstream*`, license) are
-  written in the candidate PR, so the reviewer sees them. Approval fields (`approved-by`,
-  `approved-at`, `reviewEvidence`) are stamped by the promote PR from the merged
-  candidate PR's reviews (see Flow). `riskTier` and `dataClassification` are set by the reviewer
-  during review (defaults from `channel-policy.yaml`).
+  written by the command that vendors the content, so the reviewer sees them in the PR.
+  `riskTier` and `dataClassification` come from `items.yaml` (defaults from
+  `channel-policy.yaml`); a reviewer can change them on the work branch.
 - **Drift and hashes.** `lock.json` keeps the upstream content hashes. Hashing and drift
   checks normalize away the tool's own namespaced keys, so stamping metadata is not
   reported as drift, while any other change to a mirrored file is.
@@ -294,78 +308,143 @@ Rules:
   metadata is the human-readable copy that travels with the content. `validate` checks
   that the two agree.
 
+### Versions
+
+- An item is **changed** when its lock `treeSha256` (or its file list) differs from
+  `origin/main`, or when it is new or removed.
+- **Local plugins.** When a local plugin is changed and its `plugin.json` version still
+  equals the version on `origin/main`, `build` sets it to the patch bump. When the
+  version on the branch is already higher (set by hand or by an earlier bump), it stays.
+  A new plugin starts at `0.1.0`.
+- `version <item> --patch|--minor|--major|--set X.Y.Z` sets the version relative to the
+  version on `origin/main`. `--set` must be semver and greater. The version lives only
+  in `plugin.json` on the branch; there is no extra state file. A version edit refreshes
+  the lock, so drift checks stay clean.
+- **Mirrors** keep the upstream `plugin.json` version. It is never bumped or set by the
+  tool. A mirror whose upstream has no version has none (see "Calls made").
+- `finish` lists every changed plugin with its version on `main`, its new version and a
+  major, minor or patch choice.
+
 ## Domain model
 
 | Object | Lives in | Purpose |
 |---|---|---|
-| Source | `sources.yaml` | An upstream marketplace, git repo or MCP Registry |
-| Item | `items.yaml` | A mirror (one upstream plugin), a bundle (a new plugin made of picked parts) or a local plugin, each with its refs |
-| Candidate | open PR into `staging` + its branch | A discovered upstream version that is not yet approved |
-| Approval | `approvals.yaml` + the merged PR | Reviewer, PR, risk flag result, time |
-| Release | `lock.json` entry at `main` | An approved, immutable item version |
-| MarketplaceRelease | git tag on `main` | A tagged state of the catalogs and the plugin tree |
+| Source | `sources.yaml` + `.skill-dojo/cache/` | An upstream marketplace, git repo or MCP Registry, and its cached catalog |
+| Item | `items.yaml` | A mirror (one upstream plugin) or a local plugin (own files plus optional parts), each with its refs |
+| Part | `items.yaml` + `lock.json` | One skill, agent, MCP server or hook inside a local plugin, pinned to its upstream commit |
+| WorkBranch | the branch `skill-dojo/changes` + its one PR into `main` | All changes that are not yet approved |
+| PendingVersion | computed from the branch and `origin/main` | A changed item with its old and new version |
+| Release | git tag on `main` + GitHub Release | A tagged state of the catalogs and the plugin tree, with notes |
 | Client | `clients.yaml` | Who uses which ref or tag (hand-kept) |
 | AuditEvent | git history (commits, PRs, tags) | Derived, never stored separately |
 
 ## Flow
 
 ```
-add source ─► discover (read upstream catalog) ─► select (mirror | bundle)
-   ─► resolve ref to commit ─► fetch at commit ─► normalize to Agent Plugins
-   ─► validate + risk-flag ─► branch + PR into staging (candidate)
-   ─► review: approve (UI or GitHub) ─► merge, write approvals.yaml + lock.json
-   ─► promote staging→main ─► build both catalogs ─► validate ─► tag release
+source add ─► cache (catalog + part index) ─► browse
+   ├─► mirror whole plugin ───────────────────────────┐
+   ├─► pick parts ─► into a new or existing local plugin ┤
+   └─► plugin new ─► add files by hand ─► build ────────┤
+                                                       ▼
+          commits on the work branch (one per command; sync adds upstream updates)
+                                                       ▼
+          finish: build, versions, risk flags ─► push ─► one PR into main
+                                                       ▼
+          review and merge on GitHub (branch protection) ─► release: tag + GitHub Release
 ```
 
-- The **first import** of an item and every **upstream update** use the same
-  candidate-PR path. The scheduled `sync-upstream.yml` runs the "resolve → PR" part for all
-  items. The CLI can run it on demand.
-- **Approving in the UI** does the same as approving on GitHub: it submits a GitHub PR
-  review and merges through `gh`. If branch protection requires a second reviewer, the UI
-  shows the PR as waiting and does not get around the rule.
-- **Where approval facts come from (my call).** The candidate PR already contains
-  everything except the approval: the vendored files, the `lock.json` entry and the
-  upstream metadata. Merging needs no tool code, so a merge on github.com works the same
-  as one from the UI. The approval facts (approving reviewers, time, PR URL) are read
-  from the merged PR through the GitHub API. They are written into `approvals.yaml` and
-  into the `approved-by` and `approved-at` metadata by the **promote PR**. No bot ever
-  pushes past branch protection.
-- **Promotion (my call).** `promote` opens a PR from `staging` to `main`. It moves all of
-  `staging` at once, with no cherry-picking single items. The promote PR stamps the
-  approval metadata, rebuilds both catalogs and runs `validate`. Merging it and then
-  running `release` creates the tag. To leave an item out, revert it on `staging` first.
-- **Revocation (my call)** goes straight to `main` as a hotfix PR, followed by an
-  automatic back-merge PR into `staging`. A revocation must not wait behind unreviewed
-  candidates. It removes or rolls back the item, and the UI lists the clients in
-  `clients.yaml` that use an affected tag.
-- **Rejection or quarantine**: you close the PR. The item stays pinned at its last approved
-  commit. A quarantine flag in `items.yaml` stops future candidates until you clear it.
+**Work branch rules.**
+
+- The name comes from `registry/config.yaml` (`work_branch`, default
+  `skill-dojo/changes`).
+- Every writing command starts by making sure the admin's checkout is on the work branch:
+  - Already on it: use it.
+  - Otherwise the working tree must be clean, or the command stops and names the dirty
+    files. The tool fetches `origin`. If `origin/<work>` exists and is not fully merged
+    into `origin/main`, it checks that out (tracking). If it is merged or missing, it
+    creates the branch fresh from `origin/main`. A local work branch with commits that are
+    not on `origin/main` yet is kept and checked out, so unpushed work is never lost.
+  - The tool never force-pushes and never rewrites history the admin pushed.
+- Each writing command makes **one commit** (`skill-dojo: <action> <item>`, with
+  `--no-verify`, because local hooks must never run on upstream content). Hand edits are
+  committed by `finish`, or by the admin.
+- A command commits only the files it changed; the admin's other uncommitted edits
+  stay out of it (`finish` commits everything). A command that fails undoes what it
+  wrote, so no half-written change is committed by the next command. Mirror folders
+  and the folder of a `local:` part source must be clean, or the command stops.
+- `work_branch` must differ from the main branch (validated in `config.yaml`).
+- `sync` (CLI and scheduled workflow) writes upstream updates into the same work branch:
+  one commit per moved mirror or local plugin with parts. It skips `quarantined` items and
+  is idempotent. It also refreshes the cached catalog of every source.
+- `finish [--level item=patch|minor|major] [--no-pr]` runs `build` and the version step,
+  commits what is left, pushes the branch and opens or updates the one PR into `main`.
+  The PR body lists every changed item with its old and new version, kind, upstream pin
+  and the risk flags against `origin/main`. `--no-pr` only pushes, and the admin opens
+  the PR by hand.
+- `status` shows the work branch: whether it exists, commits ahead of and behind
+  `origin/main`, dirty files, the PR (number, state, link) and the changed items with
+  their pending versions.
+
+**Revocation** is a normal change on the work branch. `revoke <item>` removes the item,
+or with `--to TAG` rolls it back to its content at that tag and sets `quarantined: true`.
+It reports the clients in `clients.yaml` whose ref still holds the revoked content. To
+get it out fast, finish and merge the PR on its own.
+
+**Quarantine.** `quarantined: true` in `items.yaml` only makes `sync` skip the item. The
+item stays at its pinned commit until the flag is cleared.
+
+**Release** (manual). `release` requires that `origin/main` validates and that `build
+--check` is clean there. It tags `marketplace-vYYYY.MM.DD[.N]`, writes notes (added,
+updated with old → new version, removed) and creates a GitHub Release for the tag. It
+refuses when `origin/main` has not changed since the last tag. If an earlier run pushed
+the tag but could not create the GitHub Release, the next run creates it.
+
+**Migration.** Loading `items.yaml` accepts `kind: bundle` and treats it as `local`, with
+its parts kept. `build` rewrites it as `local`. `approvals.yaml` and the `channels` and
+`reviewers` keys of `channel-policy.yaml` are ignored when read and removed by `build`.
+Existing repos keep working.
 
 ## Risk flags (shown in the PR body and in the UI)
 
-Computed from the diff between the approved and the candidate content, for example:
-new or changed executable scripts, hooks, shell commands in commands or skills, new MCP
-servers or changes to their `command`/`args`/`env`/URL, new network endpoints, changed
-permissions or allowed tools, binary files, symlinks that point outside the plugin, license
-changes, a missing or changed upstream license. Each flag points to file and line. Flags
-inform the reviewer. They never block on their own. Blocking is the job of the
-`channel-policy.yaml` rules and validation.
+Computed from the diff between `origin/main` and the work branch, for example: new or
+changed executable scripts, hooks, shell commands in commands or skills, new MCP servers or
+changes to their `command`/`args`/`env`/URL, new network endpoints, changed permissions or
+allowed tools, binary files, symlinks that point outside the plugin, license changes, a
+missing or changed upstream license. Each flag points to file and line. Flags inform the
+reviewer. They never block on their own. Blocking is the job of branch protection and
+validation. The flags appear in the work-branch PR body, as a PR comment from the
+validate workflow, and on the Changes page.
 
-## CLI surface (sketch, names left to the builder)
+## CLI surface
 
-`init` (scaffold a curated repo), `source add|list|remove`, `browse <source>`,
-`mirror <source> <plugin>`, `bundle create|add|remove`, `local add`, `sync [--item]` (make candidate
-PRs), `review list|show|approve|reject|quarantine`, `promote`, `release`, `build`
-(regenerate catalogs and layout), `validate`, `clients add|list`, `revoke`,
-`vendor` (consumer side, replaces `add-skills.sh`), `init [--adopt]`, `serve` (needs
-`skill-dojo[web]`).
+`init [--adopt]` (scaffold a curated repo), `source add|list|remove|refresh|allow`,
+`browse <source> [--refresh]`, `mirror <source> <plugin> [--as id]`,
+`add-parts <plugin> <parts...> [--create]`, `remove-parts <plugin> <kind/name...>`,
+`plugin new <name>`, `local add <dir>`, `lock refresh`, `build [--check]`, `validate`,
+`flags [--base]`, `version <item> --patch|--minor|--major|--set X.Y.Z`, `sync [--item]`,
+`status`, `finish [--level item=level] [--no-pr]`, `release`, `revoke <item> [--to TAG]`,
+`clients add|list|remove`, `marketplace add|update` (consumer side, replaces
+`add-skills.sh`; decided by the user, was `vendor`), `serve`
+(needs `skill-dojo[web]`).
+
+Parts use `source:plugin/kind/name` with `kind` one of `skill`, `agent`, `mcp_server` or
+`hook` (`mcp:<server>/mcp_server/<key>` for the MCP Registry, `local:<plugin>/...` for
+this repo's own plugins). A hook part is one event of the upstream `hooks/hooks.json` (or
+the manifest's `hooks`) plus the script files it references through
+`${CLAUDE_PLUGIN_ROOT}`. It is refused when a referenced file is missing or outside the
+plugin, or when the target already has that event.
 
 ## Web UI pages (local, `serve`)
 
-Sources · Browse/Select (mirror or bundle) · Candidates and review queue (diff, risk flags,
-approve/reject/quarantine) · Marketplace preview (the exact catalogs and tree that would be
-committed) · Releases (promote, tag, release notes) · Clients · Audit (timeline built from
-git).
+Changes (work-branch status, changed plugins with a major/minor/patch/custom version
+choice, risk flags, "Finish & open PR", the PR link and state) · Sources (sources, add a
+source, the cached plugins of each source with "Mirror whole plugin" and an expand of its
+skills, agents, MCP servers and hooks with an "Add to plugin" dialog) · Plugins (every
+item with kind, version and parts; "New plugin" with the folder path to put files in and
+a "Scan for new files" button, which runs `build`) · Marketplace preview (the exact
+catalogs and tree that would be committed) · Releases (commits on `origin/main` since the
+last tag, notes preview, "Create release", past releases) · Clients · Audit (timeline
+built from git).
 
 ## Reuse from the jenreh repo (port into skill-dojo, then delete here)
 
@@ -380,7 +459,7 @@ git).
   `validate-marketplace.yml`.
 - `scripts/add-skills.sh`: vendors the marketplace's skills into a *consumer* project
   repo (git subtree into `.agents/agent-skills`, plus `.agents/skills` and
-  `.claude/skills` symlinks). It becomes `skill-dojo vendor` (my call).
+  `.claude/skills` symlinks). It becomes `skill-dojo marketplace add|update` (named by the user).
 
 ## Calls made (not decided by the user, please check)
 
@@ -393,15 +472,20 @@ git).
    curated repo and the UI is local only, so these are removed. Reflex runs without a
    database, and identity comes from `gh auth`. Other template parts (devcontainer,
    pre-commit, Taskfile, CI, bump-my-version) are kept.
-2. **Mirrors are never hand-edited.** To change a mirror, you create your own plugin or
-   bundle. A hand edit inside a mirrored folder is caught by `validate` as drift against
-   `lock.json`.
-3. **Bundles copy exact pinned files** of each picked part and get their own version.
-   Any part's upstream change creates a candidate PR for the bundle.
-4. **Approval = UI and GitHub PR are one thing.** Git is the single source of truth, and
-   the audit trail comes from git history.
-5. **Version numbers**: a mirror keeps the upstream `version`. A bundle uses semver and gets
-   a patch bump whenever a part changes. Release tags are date-based.
+2. **Mirrors are never hand-edited.** To change a mirror, you create your own local
+   plugin and add its parts. A hand edit inside a mirrored folder is caught by `validate`
+   as drift against `lock.json`.
+3. **Parts copy exact pinned files** of each picked skill, agent, MCP server or hook into
+   a local plugin. Any part's upstream change becomes a `sync` commit on the work branch,
+   and the plugin gets a patch bump. A hand edit inside a local plugin, parts included, is
+   taken into the lock by `build`; the risk flags against `main` show it in the PR.
+4. **Approval = merging the one PR into `main`.** Git is the single source of truth, and
+   the audit trail comes from git history. The tool never merges and never bypasses
+   branch protection.
+5. **Version numbers**: a mirror keeps the upstream `version`. A local plugin uses semver
+   and gets a patch bump once per work branch when it changes, or the level chosen in
+   `finish` or `version`. A mirror whose upstream has no version gets none, because
+   writing one would change upstream bytes. Release tags are date-based.
 6. **MCP servers**: vendored as `.mcp.json` inside a plugin. Pinning means pinning the
    package version, image digest or commit that the server config references. A floating
    reference (`latest`, no version) is a validation error.
@@ -419,8 +503,9 @@ git).
    `uvx skill-dojo==X.Y.Z` at an exact version, also recorded in `registry/config.yaml`. So skill-dojo
    has tagged PyPI releases from the start (Trusted Publishing from the skill-dojo repo's CI).
    Upgrading skill-dojo in a curated repo is its own reviewed PR.
-10. **What `build` generates.** Both marketplace catalogs and the missing per-plugin
-    manifests. Per-repo branding (icon, brand color, the `extensions.com.openai`
+10. **What `build` generates.** Both marketplace catalogs, the missing per-plugin
+    manifests, the lock entries of local plugins (new or changed files) and their version
+    bumps. Per-repo branding (icon, brand color, the `extensions.com.openai`
     interface block, `agents/openai.yaml` stubs) is generated only if
     `registry/config.yaml` asks for it, ported from `codex_metadata.py`. Because the scripts
     go away, `build` must also do what `link-plugins.sh` does today, as **layout options**
@@ -429,6 +514,12 @@ git).
     symlink view. Default for a new repo: off. The jenreh repo turns them on. The hardcoded
     plugin list and descriptions in `link-plugins.sh` become data that is read from
     `items.yaml` and the manifests.
+11. **The cache lives in the repo.** Fetching and indexing hold a cache lock, and an older
+    commit's checkout is pruned only after it was unused for an hour.
+    `.skill-dojo/cache/` ignores itself through its own
+    `.gitignore`. A cached checkout is reused only when its `HEAD` is exactly the pinned
+    commit. The cache is a speed-up, never a source of truth: the ref is resolved against
+    the remote every time something is vendored.
 
 ## Left to the builder
 
@@ -439,33 +530,39 @@ how risk flags are detected, the Reflex page design within appkit-mantine, test 
 
 ## Verification (what "done" looks like)
 
-- `init` a fresh test repo. `source add` two upstreams (one Agent Plugins marketplace, one
-  Claude marketplace). `mirror` one plugin and `bundle` two skills from different sources.
-  Each opens a candidate PR into `staging` with risk flags.
-- Approve in the UI. The PR is merged, and `approvals.yaml` and `lock.json` are updated.
-  `promote` and `release` create a tag. Both catalogs validate with the ported validators.
-- Push a change upstream (in a fixture repo). The scheduled sync opens an update PR showing
-  the diff and the flags.
+- `init` a fresh test repo and push it. `source add` two upstreams (one Agent Plugins
+  marketplace, one Claude marketplace); the catalogs are cached. `browse` lists them from
+  the cache. `mirror` one plugin, `add-parts --create` two skills from different sources
+  into a new local plugin, and `plugin new` a third plugin and drop a skill into it by
+  hand, then `build`. Every command is one commit on `skill-dojo/changes`.
+- `finish` pushes the branch and opens one PR into `main` with risk flags. Every changed
+  local plugin has a higher version than on `main`; the mirror keeps its upstream
+  version; the PR body lists them.
+- Merge the PR. The next change creates a fresh work branch from `main`. A push upstream
+  (in a fixture repo) followed by `sync` adds a commit to the open work branch and
+  updates the same PR. `release` creates the tag and a GitHub Release. Both catalogs
+  validate with the ported validators.
 - Hand-edit `registry/` and a catalog, run `build` and `validate`: the result is consistent.
   Delete the tool: the repo still imports into Codex and Claude Code.
-- `source add` the MCP Registry, add one server as a wrapper plugin and one as a bundle
-  part, both pinned. A new registry version (from a fixture) opens a candidate PR.
-- Change a local skill: it goes through a candidate PR like upstream items. An untracked
-  folder under `plugins/` fails `validate`. An item with `riskTier: forbidden`, or a channel
-  not in its `supportedChannels`, cannot be promoted.
-- Merge a candidate PR on github.com (not through the UI). The next promote PR still
-  stamps the correct `approvedBy`/`approvedAt` from that PR's reviews.
+- `source add` the MCP Registry, add one server as a wrapper plugin and one as a part of a
+  local plugin, both pinned. A new registry version (from a fixture) is picked up by
+  `sync`.
+- Change a local skill: it goes through the work branch like upstream items. An untracked
+  folder under `plugins/` fails `validate`. An item with `riskTier: forbidden` fails
+  `validate`.
 - Change a mirrored file by hand: `validate` reports drift. Stamping namespaced metadata
   does not.
+- An old repo with `kind: bundle` items, `approvals.yaml` and staging channels still
+  loads; `build` rewrites it to the new form.
 - Every vendored `SKILL.md` has string-only, namespaced `metadata` with source and license.
-  Every `plugin.json` has `extensions.<namespace>` with upstream, approval and risk fields.
+  Every `plugin.json` has `extensions.<namespace>` with upstream and risk fields.
   Upstream frontmatter and other extensions are unchanged. Both pass the Agent Skills and
   Agent Plugins schema checks.
 - Unit tests per module. An end-to-end test against local fixture git repos (no network).
 - `uvx skill-dojo==<released version> validate` works in a clean GitHub Actions runner without
   the web extra.
 - **Adopt the jenreh repo:** `skill-dojo init --adopt` registers the existing plugins as
-  `local` items (and as `mirror`/`bundle` parts where the upstream origin is known), adds
+  `local` items (with parts where the upstream origin is known), adds
   `registry/`, pins the context7 MCP server, and turns on the symlink layout options.
   Then `scripts/` is deleted and Taskfile and workflows call `skill-dojo`. Afterwards,
   `skill-dojo build && git diff` shows only the intended metadata additions, and
