@@ -338,20 +338,6 @@ class ChannelPolicy(YamlModel):
         return data
 
 
-# --- registry/clients.yaml --------------------------------------------------
-
-
-class Client(YamlModel):
-    name: str
-    ref: str
-    contact: str | None = None
-    notes: str | None = None
-
-
-class ClientsFile(YamlModel):
-    clients: list[Client] = Field(default_factory=list)
-
-
 # --- registry/lock.json -----------------------------------------------------
 
 

@@ -22,6 +22,7 @@ def _plugin(info: core.PluginInfo) -> dict[str, Any]:
                 "short": f"{p.kind}/{p.name}",
                 "kind_label": KIND.get(p.kind, p.kind),
                 "commit": (p.commit or "")[:12],
+                "version": p.version or "",
             }
             for p in info.parts
         ],
@@ -30,6 +31,7 @@ def _plugin(info: core.PluginInfo) -> dict[str, Any]:
 
 class PluginsState(AppState):
     plugins: list[dict[str, Any]] = []
+    marketplace_version: str = ""
     query: str = ""
     new_name: str = ""
     new_description: str = ""
@@ -58,11 +60,12 @@ class PluginsState(AppState):
     def load(self) -> None:
         self.load_shell()
         try:
-            found = core.plugins_overview(self._ctx()).plugins
+            found = core.plugins_overview(self._ctx())
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
             return
-        self.plugins = [_plugin(p) for p in found]
+        self.marketplace_version = found.marketplace_version or ""
+        self.plugins = [_plugin(p) for p in found.plugins]
 
     @rx.event
     def set_query(self, value: str) -> None:

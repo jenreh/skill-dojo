@@ -5,10 +5,29 @@ from typing import Any
 import appkit_mantine as mn
 import reflex as rx
 
+from skill_dojo_web.state import AppState
 from skill_dojo_web.theme import MONO
 
 # Risk severity / status tone -> Mantine color
 TONES = {"add": "green", "warn": "yellow", "bad": "red", "info": "blue"}
+
+# A column that fills the window: below the shell header (52px) and main padding.
+WINDOW_TOP = "calc(52px + var(--mantine-spacing-md))"
+WINDOW_HEIGHT = "calc(100dvh - 52px - 2 * var(--mantine-spacing-md))"
+
+
+def work(key: Any, *events: Any) -> list[Any]:
+    """Events for a click: ``key`` shows as working until ``events`` are done.
+
+    Each event's state update reaches the browser before the next one runs, so
+    the spinner appears at once and stays for the whole backend call.
+    """
+    return [AppState.start_work(key), *events, AppState.end_work]
+
+
+def working(key: Any) -> Any:
+    """True while the control ``key`` waits for its events."""
+    return AppState.working == key
 
 
 def tone_color(tone: Any) -> Any:

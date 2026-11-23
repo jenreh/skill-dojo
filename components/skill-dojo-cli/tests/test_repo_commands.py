@@ -142,6 +142,11 @@ def test_source_mirror_parts_sync_flags_commands(
     browsed = invoke("browse", "ap", "--parts").output
     assert "(cached)" in browsed
     assert "ap:hello/skill/greet" in browsed
+    cl = fixture_repos.claude_marketplace()
+    assert invoke("source", "add", "cl", cl.url).exit_code == 0
+    browsed = invoke("browse", "cl", "--parts").output
+    assert "cl v3.1.0 @ " in browsed
+    assert "cl:tools/skill/lint 1.4.0" in browsed
     assert "Refreshed ap" in invoke("source", "refresh", "ap").output
     assert "Allowed" in invoke("source", "allow", "ap", "hello").output
     assert "hello: added" in invoke("mirror", "ap", "hello").output
@@ -185,10 +190,8 @@ def test_release_and_revoke_commands(
     assert "Tagged marketplace-v" in released.output
     assert "GitHub Release:" in released.output
     assert "nothing to release" in invoke("release").output
-    assert "team" in invoke("clients", "add", "team", "main").output
     revoked = invoke("revoke", "own")
     assert "own: removed" in revoked.output
-    assert "team (main)" in revoked.output
 
 
 def test_mcp_registry_browse_and_mirror(

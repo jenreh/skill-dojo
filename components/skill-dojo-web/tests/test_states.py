@@ -4,22 +4,25 @@ Git is real; GitHub is the shared fake. Event handlers are called through
 ``.fn`` on a state taken from a fresh root state.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
 import pytest
+import reflex as rx
 from reflex.state import State
 
 import skill_dojo_core as core
 from skill_dojo_core import Context, NotFoundError, finish, mirror
 from skill_dojo_web import backend, server
+from skill_dojo_web.components.common import work, working
 from skill_dojo_web.pages.audit.state import AuditState, day_label
 from skill_dojo_web.pages.changes.state import ChangesState
-from skill_dojo_web.pages.clients.state import ClientsState
 from skill_dojo_web.pages.plugins.state import PluginsState
 from skill_dojo_web.pages.preview.state import PreviewState
 from skill_dojo_web.pages.releases.state import ReleasesState
-from skill_dojo_web.pages.sources.state import SourcesState
+from skill_dojo_web.pages.revoke.state import RevokeState
+from skill_dojo_web.pages.sources.state import NEW, SourcesState
 from skill_dojo_web.state import failure
 from tests.support.fake_github import FakeGitHub
 from tests.support.fixture_repos import FixtureRepo
@@ -79,6 +82,16 @@ def test_changes_state_lists_versions_and_choices(
     assert st.chosen == {"own": "major"}
 
 
+def test_sources_state_part_targets_are_independent() -> None:
+    st = state(SourcesState)
+    st.local_plugins = ["kit", "team"]
+    st.part_rows = [{"spec": "ap:hello/skill/a"}, {"spec": "ap:hello/skill/b"}]
+    call(st, "set_part_target", "ap:hello/skill/a", "kit")
+    assert [r["target"] for r in st.part_list] == ["kit", NEW]
+    call(st, "set_part_target", "ap:hello/skill/b", "team")
+    assert [r["target"] for r in st.part_list] == ["kit", "team"]
+
+
 def test_sources_state_browse_mirror_and_parts(
     ui: Context, fake_github: FakeGitHub
 ) -> None:
@@ -92,21 +105,34 @@ def test_sources_state_browse_mirror_and_parts(
     assert [p["name"] for p in st.shown] == ["hello"]
     call(st, "mirror", "hello")
     assert "hello: added" in st.notice
+    spec = "ap:hello/skill/greet"
     call(st, "expand", "hello")
-    assert [r["spec"] for r in st.part_rows] == ["ap:hello/skill/greet"]
-    call(st, "toggle_pick", "ap:hello/skill/greet")
-    assert st.picked_count == 1
-    call(st, "open_dialog")
+    [row] = st.part_list
+    assert row["spec"] == spec
+    assert row["description"] == "Greets the user. Use when saying hello."
+    assert (row["on"], row["target"]) == (False, NEW)
+    call(st, "toggle_part", spec, True)
     assert st.dialog
-    assert st.creating
-    assert st.cannot_add
+    assert st.cannot_create
     call(st, "set_target_name", "kit")
-    call(st, "add_to_plugin")
+    call(st, "create_plugin")
     assert "kit: created" in st.notice, st.notice
-    assert st.picked == []
-    call(st, "open_dialog")
-    assert [o["value"] for o in st.target_options][1:] == ["kit"]
+    assert not st.dialog
+    assert [o["value"] for o in st.target_options] == [NEW, "kit"]
+    assert [(r["on"], r["target"]) for r in st.part_list] == [(True, "kit")]
+    call(st, "toggle_part", spec, False)
+    assert "Removed skill/greet from kit" in st.notice, st.notice
+    assert [(r["on"], r["target"]) for r in st.part_list] == [(False, "kit")]
+    call(st, "set_part_target", spec, NEW)
+    assert st.part_list[0]["target"] == NEW
+    call(st, "set_part_target", spec, "kit")
+    call(st, "toggle_part", spec, True)
+    assert not st.dialog
+    assert "Added skill/greet to kit" in st.notice, st.notice
+    assert st.part_list[0]["on"]
+    call(st, "toggle_part", spec, True)
     call(st, "close_dialog")
+    assert st.pending == ""
     call(st, "expand", "hello")
     assert st.expanded == ""
     call(st, "refresh")
@@ -118,12 +144,24 @@ def test_sources_state_browse_mirror_and_parts(
     assert not fake_github.pulls
 
 
+def test_sources_state_versions(ui: Context) -> None:
+    st = state(SourcesState)
+    call(st, "load")
+    assert st.version == ""
+    call(st, "select", "cl")
+    assert st.version == "3.1.0"
+    call(st, "expand", "tools")
+    assert [r["version"] for r in st.part_list] == ["1.4.0"]
+
+
 def test_plugins_state_new_plugin_and_scan(ui: Context) -> None:
     core.add_parts(ui, "kit", ["ap:hello/skill/greet"], create=True)
     st = state(PluginsState)
     call(st, "load")
     assert [p["id"] for p in st.plugins] == ["kit"]
     assert st.plugins[0]["parts"][0]["short"] == "skill/greet"
+    assert st.plugins[0]["parts"][0]["version"] == ""
+    assert st.marketplace_version == ""
     assert st.cannot_create
     call(st, "set_new_name", "own")
     call(st, "set_new_description", "Our things.")
@@ -146,7 +184,7 @@ def test_plugins_state_new_plugin_and_scan(ui: Context) -> None:
     assert st.notice_ok is False
 
 
-def test_releases_clients_preview_audit(ui: Context, fake_github: FakeGitHub) -> None:
+def test_releases_revoke_preview_audit(ui: Context, fake_github: FakeGitHub) -> None:
     mirror(ui, "ap", "hello")
     done = finish(ui)
     assert done.pull_request is not None
@@ -155,7 +193,7 @@ def test_releases_clients_preview_audit(ui: Context, fake_github: FakeGitHub) ->
     call(rel, "load")
     assert rel.untagged
     assert not rel.nothing_new
-    assert any("mirror hello" in c["subject"] for c in rel.commits)
+    assert any(c["subject"] == "skill-dojo: finish" for c in rel.commits)
     call(rel, "set_notes", "Release notes by hand.")
     call(rel, "create")
     assert "Released marketplace-v" in rel.notice, rel.notice
@@ -165,23 +203,12 @@ def test_releases_clients_preview_audit(ui: Context, fake_github: FakeGitHub) ->
     call(rel, "create")
     assert "has not changed" in rel.notice
 
-    clients = state(ClientsState)
-    call(clients, "load")
-    for key, value in (("name", "web"), ("ref", "main"), ("contact", "#web")):
-        call(clients, "set_field", key, value)
-    call(clients, "add_client")
-    assert [c["name"] for c in clients.clients] == ["web"]
-    assert clients.item == "hello"
-    assert clients.affected_names == ["web"]
-    call(clients, "edit_client", "web")
-    call(clients, "set_field", "contact", "#web-guild")
-    call(clients, "add_client")
-    assert clients.clients[0]["contact"] == "#web-guild", clients.notice
-    call(clients, "remove_client", "web")
-    assert clients.clients == []
-    call(clients, "set_action", "remove")
-    call(clients, "revoke")
-    assert "Revoked hello (removed)" in clients.notice, clients.notice
+    rev = state(RevokeState)
+    call(rev, "load")
+    assert rev.item == "hello"
+    call(rev, "set_action", "remove")
+    call(rev, "revoke")
+    assert "Revoked hello (removed)" in rev.notice, rev.notice
 
     preview = state(PreviewState)
     call(preview, "load")
@@ -197,6 +224,20 @@ def test_releases_clients_preview_audit(ui: Context, fake_github: FakeGitHub) ->
     call(audit, "set_kind", "release")
     assert all(e["kind"] == "release" for d in audit.days for e in d["events"])
     assert call(audit, "export") is not None
+
+
+def test_work_marks_the_clicked_control_busy() -> None:
+    st = state(SourcesState)
+    call(st, "start_work", "mirror:hello")
+    assert st.working == "mirror:hello"
+    call(st, "end_work")
+    assert st.working == ""
+    start, action, end = work("refresh", SourcesState.refresh)
+    assert start.handler.fn.__name__ == "start_work"
+    assert start.args[0][1].equals(rx.Var.create("refresh"))
+    assert action is SourcesState.refresh
+    assert end.fn.__name__ == "end_work"
+    assert isinstance(working("refresh"), rx.Var)
 
 
 def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -222,3 +263,29 @@ def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "skill_dojo_web.app" in (work / "rxconfig.py").read_text()
     assert '"http://localhost:8099"' in (work / "rxconfig.py").read_text()
     assert server.command(8099)[-3:] == ["8099", "--backend-host", "127.0.0.1"]
+
+
+def test_warm_actor_asks_gh_once_off_the_event_loop(
+    ui: Context, fake_github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asyncio.run(backend.warm_actor())
+    assert backend.settings.actors == {ui.repo: fake_github.user}
+    backend.make_context()
+    assert fake_github.calls.count(("current_user", ())) == 1
+    monkeypatch.delenv(backend.REPO_ENV)
+    asyncio.run(backend.warm_actor())  # a failure waits for the page load
+
+
+def test_prepare_and_command_for_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    work = server.prepare(server.cache_dir(), 8099, reload=True)
+    config = (work / "rxconfig.py").read_text()
+    assert "frontend_port=8099" in config
+    assert "backend_port=8100" in config
+    assert 'api_url="http://127.0.0.1:8100"' in config
+    command = server.command(8099, reload=True)
+    assert command[command.index("--env") + 1] == "dev"
+    assert "--single-port" not in command
+    assert command[command.index("--backend-port") + 1] == "8100"

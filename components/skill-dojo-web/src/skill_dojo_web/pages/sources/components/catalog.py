@@ -3,7 +3,15 @@
 import appkit_mantine as mn
 import reflex as rx
 
-from skill_dojo_web.components.common import badge, mono, panel, segmented
+from skill_dojo_web.components.common import (
+    WINDOW_HEIGHT,
+    badge,
+    mono,
+    panel,
+    segmented,
+    work,
+    working,
+)
 from skill_dojo_web.pages.sources.state import KINDS
 from skill_dojo_web.pages.sources.state import SourcesState as S
 
@@ -40,7 +48,12 @@ def _actions(p: rx.Var) -> rx.Component:
         mn.group(
             rx.cond(
                 addable & (p["tracked"].to(str) == ""),
-                mn.button("Mirror whole plugin", size="xs", on_click=S.mirror(name)),
+                mn.button(
+                    "Mirror whole plugin",
+                    size="xs",
+                    loading=working(f"mirror:{name}"),
+                    on_click=work(f"mirror:{name}", S.mirror(name)),
+                ),
             ),
             rx.cond(
                 addable,
@@ -48,26 +61,80 @@ def _actions(p: rx.Var) -> rx.Component:
                     rx.cond(S.expanded == name, "Hide parts", "Pick parts"),
                     size="xs",
                     variant="default",
-                    on_click=S.expand(name),
+                    loading=working(f"parts:{name}"),
+                    on_click=work(f"parts:{name}", S.expand(name)),
                 ),
             ),
             gap=6,
             justify="flex-end",
         ),
-        mn.button("Allow", size="xs", variant="subtle", on_click=S.allow(name)),
+        mn.button(
+            "Allow",
+            size="xs",
+            variant="subtle",
+            loading=working(f"allow:{name}"),
+            on_click=work(f"allow:{name}", S.allow(name)),
+        ),
     )
 
 
+# Plugin rows and each part highlight on their own (not the whole parts block,
+# which Mantine's highlight_on_hover would do).
+_HOVER = {"backgroundColor": "var(--table-hover-color)"}
+
+
 def _part(part: rx.Var) -> rx.Component:
+    """Name, kind and description; the plugin select and switch on the right."""
     spec = part["spec"].to(str)
+    on = part["on"].to(bool)
+    description = part["description"].to(str)
     return mn.group(
-        mn.checkbox(
-            label=part["name"].to(str),
-            checked=S.picked.contains(spec),
-            on_change=lambda _: S.toggle_pick(spec),
+        mn.stack(
+            mn.group(
+                mono(part["name"]),
+                badge(part["kind"]),
+                rx.cond(
+                    part["version"].to(str) != "",
+                    mono(part["version"], c="dimmed"),
+                ),
+                gap="xs",
+            ),
+            rx.cond(
+                description != "",
+                mn.text(description, size="xs", c="dimmed", line_clamp=2),
+            ),
+            gap=2,
+            flex="1",
+            miw=0,
         ),
-        badge(part["kind"]),
-        gap="xs",
+        mn.group(
+            mn.select(
+                data=S.target_options,
+                value=part["target"].to(str),
+                on_change=lambda v: S.set_part_target(spec, v),
+                allow_deselect=False,
+                disabled=on,
+                aria_label="Plugin for this part",
+                size="xs",
+                w=180,
+            ),
+            rx.cond(working(f"part:{spec}"), mn.loader(size="xs")),
+            mn.switch(
+                checked=on,
+                disabled=working(f"part:{spec}"),
+                on_change=lambda v: work(f"part:{spec}", S.toggle_part(spec, v)),
+                aria_label="In the selected plugin",
+            ),
+            gap="sm",
+            wrap="nowrap",
+            ml="auto",
+        ),
+        justify="space-between",
+        wrap="nowrap",
+        py=6,
+        px="sm",
+        style={"borderRadius": "var(--mantine-radius-sm)"},
+        _hover=_HOVER,
     )
 
 
@@ -75,19 +142,15 @@ def _parts(p: rx.Var) -> rx.Component:
     return mn.table.tr(
         mn.table.td(
             mn.stack(
-                mn.group(
-                    rx.foreach(S.part_rows, _part),
-                    gap="lg",
-                    wrap="wrap",
-                ),
+                rx.foreach(S.part_list, _part),
                 rx.cond(
-                    S.part_rows.length() == 0,
+                    S.part_list.length() == 0,
                     mn.text("This plugin has no parts to pick.", size="xs", c="dimmed"),
                 ),
-                gap="xs",
-                py="xs",
+                gap=0,
+                pl="md",
             ),
-            col_span=6,
+            custom_attrs={"colSpan": 6},
         ),
     )
 
@@ -109,7 +172,7 @@ def _row(p: rx.Var) -> rx.Component:
         ),
         mn.table.td(_status(p)),
         mn.table.td(_actions(p), ta="right"),
-        on_mouse_enter=S.set_focus(p["name"].to(str)),
+        _hover=_HOVER,
     )
 
 
@@ -117,34 +180,29 @@ def _rows(p: rx.Var) -> rx.Component:
     return rx.fragment(_row(p), rx.cond(S.expanded == p["name"].to(str), _parts(p)))
 
 
-def _note() -> rx.Component:
-    return mn.alert(
-        mn.group(
-            mn.text(
-                "Mirror pins ",
-                mono(S.focus),
-                " at the source's current commit as a commit on the work branch. "
-                "Nothing ships until the work-branch PR is merged and released.",
-                size="sm",
-                flex="1 1 300px",
-            ),
-            mono(f"skill-dojo mirror {S.selected} {S.focus}", c="dimmed"),
-            wrap="wrap",
-        ),
-        icon=rx.icon("info", size=16),
-        color="blue",
-        variant="light",
-    )
-
-
 def catalog() -> rx.Component:
+    """Header, filter and bars stay put; the plugin rows scroll within the window."""
     src = S.source
     return mn.stack(
         mn.group(
             mn.stack(
-                mono(f"{src['repository']} {src['path']}", c="dimmed"),
+                mn.group(
+                    rx.cond(
+                        src["url"].to(str) != "",
+                        mn.anchor(
+                            mono(src["repository"]),
+                            href=src["url"].to(str),
+                            target="_blank",
+                            rel="noopener noreferrer",
+                        ),
+                        mono(src["repository"], c="dimmed"),
+                    ),
+                    mono(src["path"], c="dimmed"),
+                    gap=6,
+                ),
                 mn.group(
                     mn.title(S.selected, order=2, size="h3"),
+                    rx.cond(S.version != "", badge(f"v{S.version}")),
                     badge(f"{S.plugins.length()} plugins"),
                     rx.cond(S.cached, badge(f"cached @ {S.commit}", "info")),
                     gap="xs",
@@ -155,7 +213,8 @@ def catalog() -> rx.Component:
                 "Refresh catalog",
                 left_section=rx.icon("refresh-cw", size=14),
                 variant="default",
-                on_click=S.refresh,
+                loading=working("refresh"),
+                on_click=work("refresh", S.refresh),
             ),
             justify="space-between",
             align="flex-start",
@@ -191,28 +250,22 @@ def catalog() -> rx.Component:
                         )
                     ),
                     mn.table.tbody(rx.foreach(S.shown, _rows)),
-                    highlight_on_hover=True,
+                    highlight_on_hover=False,
                     vertical_spacing="sm",
+                    sticky_header=True,
                 ),
                 min_width=720,
+                flex="1",
+                mih=0,
             ),
+            flex="1",
+            mih=0,
+            display="flex",
+            style={"flexDirection": "column"},
         ),
-        rx.cond(S.picked_count > 0, _picked_bar()),
-        rx.cond(S.focus != "", _note()),
         _dialog(),
         gap="md",
-    )
-
-
-def _picked_bar() -> rx.Component:
-    return mn.alert(
-        mn.group(
-            mn.text(f"{S.picked_count} part(s) picked", size="sm", flex="1"),
-            mn.button("Add to plugin", size="xs", on_click=S.open_dialog),
-            wrap="nowrap",
-        ),
-        color="blue",
-        variant="light",
+        h=WINDOW_HEIGHT,
     )
 
 
@@ -220,35 +273,30 @@ def _dialog() -> rx.Component:
     return mn.modal(
         mn.stack(
             mn.text(
-                f"Copies {S.picked_count} pinned part(s) into a local plugin, as a "
-                "commit on the work branch.",
+                f"Creates a local plugin with the pinned part {S.pending_name} on "
+                "the work branch. You decide when to commit it.",
                 size="sm",
                 c="dimmed",
             ),
-            mn.select(
-                label="Plugin",
-                data=S.target_options,
-                value=S.target,
-                on_change=S.set_target,
-                allow_deselect=False,
-            ),
-            rx.cond(
-                S.creating,
-                mn.text_input(
-                    label="New plugin name",
-                    placeholder="team-kit",
-                    value=S.target_name,
-                    on_change=S.set_target_name,
-                ),
+            mn.text_input(
+                label="Plugin name",
+                placeholder="team-kit",
+                value=S.target_name,
+                on_change=S.set_target_name,
             ),
             mn.group(
                 mn.button("Cancel", variant="default", on_click=S.close_dialog),
-                mn.button("Add parts", disabled=S.cannot_add, on_click=S.add_to_plugin),
+                mn.button(
+                    "Create plugin",
+                    disabled=S.cannot_create,
+                    loading=working("create_plugin"),
+                    on_click=work("create_plugin", S.create_plugin),
+                ),
                 justify="flex-end",
             ),
             gap="sm",
         ),
-        title="Add to plugin",
+        title="New plugin",
         opened=S.dialog,
         on_close=S.close_dialog,
         centered=True,

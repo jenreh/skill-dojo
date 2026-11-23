@@ -35,7 +35,7 @@ def source_add(
         list[str] | None, typer.Option(help="Only offer these plugins (repeatable).")
     ] = None,
 ) -> None:
-    """Add an upstream source (a commit on the work branch) and cache it."""
+    """Add an upstream source on the work branch and cache it."""
     core.source_add(
         build_context(Path.cwd()),
         source_id,
@@ -98,7 +98,8 @@ def browse(
         build_context(Path.cwd()), source_id, search=search, refresh=refresh
     )
     cached = " (cached)" if result.cached else ""
-    typer.echo(f"{result.source} @ {result.commit}{cached}")
+    marketplace = f" v{result.version}" if result.version else ""
+    typer.echo(f"{result.source}{marketplace} @ {result.commit}{cached}")
     for plugin in result.plugins:
         version = f" {plugin.version}" if plugin.version else ""
         where = f" ({plugin.repository})" if plugin.repository != result.source else ""
@@ -111,4 +112,4 @@ def browse(
         if parts:
             for part in result.parts.get(plugin.name, []):
                 spec = f"{result.source}:{plugin.name}/{part.kind}/{part.name}"
-                typer.echo(f"      {spec}")
+                typer.echo(f"      {spec} {part.version or ''}".rstrip())

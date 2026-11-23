@@ -25,7 +25,7 @@ def test_main_maps_core_errors_to_exit_codes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # The test cwd is not a git repository.
-    monkeypatch.setattr("sys.argv", ["skill-dojo", "clients", "list"])
+    monkeypatch.setattr("sys.argv", ["skill-dojo", "validate"])
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 5

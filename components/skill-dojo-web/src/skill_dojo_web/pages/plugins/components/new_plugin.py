@@ -3,7 +3,7 @@
 import appkit_mantine as mn
 import reflex as rx
 
-from skill_dojo_web.components.common import mono, panel
+from skill_dojo_web.components.common import mono, panel, work, working
 from skill_dojo_web.pages.plugins.state import PluginsState as S
 
 
@@ -37,7 +37,8 @@ def new_plugin() -> rx.Component:
                 "Create plugin",
                 left_section=rx.icon("plus", size=14),
                 disabled=S.cannot_create,
-                on_click=S.create,
+                loading=working("new_plugin"),
+                on_click=work("new_plugin", S.create),
             ),
             mn.divider(),
             mn.text(
@@ -50,7 +51,8 @@ def new_plugin() -> rx.Component:
                 "Scan for new files",
                 left_section=rx.icon("scan-search", size=14),
                 variant="default",
-                on_click=S.scan,
+                loading=working("scan"),
+                on_click=work("scan", S.scan),
             ),
             gap="sm",
         ),

@@ -3,7 +3,15 @@
 import appkit_mantine as mn
 import reflex as rx
 
-from skill_dojo_web.components.common import badge, empty, mono, panel, panel_head
+from skill_dojo_web.components.common import (
+    badge,
+    empty,
+    mono,
+    panel,
+    panel_head,
+    work,
+    working,
+)
 from skill_dojo_web.pages.releases.state import ReleasesState as S
 
 
@@ -45,7 +53,8 @@ def since_last() -> rx.Component:
                 "Create release",
                 left_section=rx.icon("tag", size=14),
                 disabled=S.nothing_new,
-                on_click=S.create,
+                loading=working("release"),
+                on_click=work("release", S.create),
             ),
             mn.text(
                 "Checks that main validates, then tags it and creates a GitHub "
@@ -60,16 +69,10 @@ def since_last() -> rx.Component:
 
 
 def _tag_row(t: rx.Var) -> rx.Component:
-    clients = t["clients"].to(int)
     return mn.group(
         rx.icon("tag", size=13),
         mono(t["tag"].to(str).replace("marketplace-", ""), flex="1"),
-        mn.text(
-            f"{t['items']} items · {clients} ",
-            rx.cond(clients == 1, "client", "clients"),
-            size="xs",
-            c="dimmed",
-        ),
+        mn.text(f"{t['items']} items", size="xs", c="dimmed"),
         px="md",
         py="xs",
     )

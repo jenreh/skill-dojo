@@ -19,8 +19,7 @@ ItemOption = Annotated[str | None, typer.Option(help="Only this item.")]
 
 def echo_change(result: core.ChangeResult) -> None:
     pin = f" @ {result.pin[:12]}" if result.pin else ""
-    commit = f" (commit {result.commit[:12]})" if result.commit else ""
-    typer.echo(f"{result.item}: {result.status}{pin}{commit}")
+    typer.echo(f"{result.item}: {result.status}{pin}")
     for flag in result.flags:
         line = f":{flag.line}" if flag.line else ""
         typer.echo(f"  {flag.kind} {flag.path}{line} {flag.detail}")
@@ -116,7 +115,7 @@ def version(
 
 
 def sync(item: ItemOption = None) -> None:
-    """Commit upstream changes onto the work branch."""
+    """Write upstream changes into the work branch (finish commits them)."""
     result = core.sync(build_context(Path.cwd()), item=item)
     if result.refreshed:
         typer.echo(f"Refreshed sources: {', '.join(result.refreshed)}")

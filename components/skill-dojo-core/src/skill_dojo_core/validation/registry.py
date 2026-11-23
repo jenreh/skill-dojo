@@ -153,6 +153,7 @@ def check_provenance(reg: Registry, item: Item, lock: ItemLock, rep: Collector) 
             lock,
             manifest,
             folder.name,
+            folder.relative_to(root).as_posix(),
         )
         prefixed = expected.skill_metadata(ns.skill)
         plain = {k[len(ns.skill) :]: v for k, v in prefixed.items()}

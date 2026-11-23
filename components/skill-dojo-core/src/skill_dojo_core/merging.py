@@ -18,7 +18,6 @@ from typing import Any
 from skill_dojo_core import catalogs, git
 from skill_dojo_core.errors import ConflictError
 from skill_dojo_core.registry import (
-    CLIENTS,
     ITEMS,
     LOCK,
     REGISTRY_DIR,
@@ -35,7 +34,6 @@ MISSING = object()
 YAML_LISTS = {
     f"{REGISTRY_DIR}/{ITEMS}": ("items", "id"),
     f"{REGISTRY_DIR}/{SOURCES}": ("sources", "id"),
-    f"{REGISTRY_DIR}/{CLIENTS}": ("clients", "name"),
 }
 LOCK_PATH = f"{REGISTRY_DIR}/{LOCK}"
 REBUILT = frozenset({catalogs.AGENTS_CATALOG, catalogs.CLAUDE_CATALOG})

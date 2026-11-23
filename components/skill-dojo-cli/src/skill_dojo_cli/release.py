@@ -88,14 +88,8 @@ def revoke(
         typer.Option(help="Roll back to the item as it is at this tag or ref."),
     ] = None,
 ) -> None:
-    """Remove or roll back an item on the work branch; lists affected clients."""
+    """Remove or roll back an item on the work branch."""
     result = core.revoke(build_context(Path.cwd()), item, to=to)
     typer.echo(
         f"{result.item}: {result.action}. Run 'skill-dojo finish' to open the PR."
     )
-    if result.affected_clients:
-        typer.echo("Affected clients:")
-        echo_lines([f"{c.name} ({c.ref})" for c in result.affected_clients])
-    if result.unknown_clients:
-        typer.echo("Clients with a ref that was not found:")
-        echo_lines([f"{c.name} ({c.ref})" for c in result.unknown_clients])

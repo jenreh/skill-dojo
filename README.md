@@ -38,8 +38,10 @@ uv run skill-dojo --help
    (git ignores it) and `browse` reads it from there.
 2. `mirror` a whole plugin, or `add-parts` skills, agents, MCP servers or hooks into a
    new or existing local plugin, or `plugin new` and drop files in, then `build`.
-3. Every command is one commit on the work branch `skill-dojo/changes` in your
-   checkout (created from `origin/main` when needed). Plugin versions are bumped for you.
+3. Every command changes files on the work branch `skill-dojo/changes` in your
+   checkout (created from `origin/main` when needed; your uncommitted edits come along).
+   Nothing is committed for you: commit when you want, or let `finish` do it. Plugin
+   versions are bumped for you.
 4. `finish` pushes the branch and opens one PR into `main`. Merging it is the approval.
 5. `release` tags `main` and creates a GitHub Release.
 
@@ -50,24 +52,23 @@ uv run skill-dojo --help
 | `skill-dojo init [--name] [--repository] [--tool-git SHA \| --tool-version X.Y.Z]` | Scaffold `registry/`, both catalogs and `.github/workflows/validate-marketplace.yml` |
 | `skill-dojo init --adopt [--repository] [--tool-git SHA]` | Turn an existing marketplace into a curated one: every `plugins/*` becomes a local item; name, owner, layout, branding, categories and policies are read from the existing catalogs and manifests; floating MCP refs and likely vendored skills are reported |
 | `skill-dojo source add <id> <owner/name or URL> [--type] [--ref] [--allow]` / `list` / `remove` / `allow` / `refresh [id]` | Upstream sources: Agent Plugins or Claude marketplaces, a plain git repo, or the MCP Registry (`--type mcp_registry https://registry.modelcontextprotocol.io`); `add` caches the catalog |
-| `skill-dojo browse <source> [--refresh] [--parts] [--search]` | What a source offers, from the cache (`--refresh` fetches again); `--parts` lists each plugin's parts as `source:plugin/kind/name` |
+| `skill-dojo browse <source> [--refresh] [--parts] [--search]` | What a source offers, from the cache (`--refresh` fetches again); `--parts` lists each plugin's parts as `source:plugin/kind/name`; shows the marketplace, plugin and part versions where upstream declares them |
 | `skill-dojo mirror <source> <plugin> [--as id]` | Vendor a whole plugin at the pinned upstream commit, with lock entry and metadata. An MCP Registry server becomes a wrapper plugin pinned to the exact npm/PyPI version or OCI image digest |
 | `skill-dojo add-parts <plugin> <parts...> [--create] [--description] [--category]` | Copy parts into a local plugin: `source:plugin/kind/name` with kind `skill`, `agent`, `mcp_server` or `hook` (`mcp:<server>/mcp_server/<key>` for the MCP Registry, `local:<plugin>/...` for this repo) |
 | `skill-dojo remove-parts <plugin> <kind/name...>` | Remove parts from a local plugin |
 | `skill-dojo plugin new <name> [--description] [--category]` | An empty local plugin at `0.1.0`; put files into `plugins/<name>/`, then `build` |
 | `skill-dojo build [--check]` | Lock new or edited files of local plugins, bump their versions, regenerate catalogs, manifests, branding, metadata and layout links |
 | `skill-dojo version <item> --patch\|--minor\|--major\|--set X.Y.Z` | Set a local plugin's version relative to `main` (mirrors keep the upstream version) |
-| `skill-dojo sync [--item]` | Refresh the cached catalogs and commit every moved mirror or plugin with parts onto the work branch (idempotent; quarantined items skipped) |
+| `skill-dojo sync [--item]` | Refresh the cached catalogs and write every moved mirror or plugin with parts into the work branch (idempotent; quarantined items skipped) |
 | `skill-dojo status` | The work branch: ahead/behind `main`, uncommitted files, its PR, changed plugins with old and new version |
-| `skill-dojo finish [--level item=patch\|minor\|major\|X.Y.Z] [--no-pr]` | Build, set versions, commit, push and open or update the one PR into `main` (body: versions, pins, risk flags) |
+| `skill-dojo finish [--level item=patch\|minor\|major\|X.Y.Z] [--no-pr]` | Build, set versions, commit everything, push and open or update the one PR into `main` (body: versions, pins, risk flags) |
 | `skill-dojo release [--notes]` | After the merge: validate `origin/main`, tag `marketplace-vYYYY.MM.DD[.N]` and create a GitHub Release |
-| `skill-dojo revoke <item> [--to TAG]` | On the work branch: remove the item, or roll it back to a tag and quarantine it; lists the clients whose ref holds it |
-| `skill-dojo clients add <name> <ref> [--contact] [--notes] [--update]` / `list` / `remove` | The hand-kept `registry/clients.yaml` |
+| `skill-dojo revoke <item> [--to TAG]` | On the work branch: remove the item, or roll it back to a tag and quarantine it |
 | `skill-dojo flags [--base origin/main]` | Risk flags of the working tree against a base, as markdown (the validate workflow posts them on PRs into `main`) |
 | `skill-dojo local add plugins/<name>` / `lock refresh [--item]` | Register an existing folder; recompute local lock entries (`build` does this too) |
 | `skill-dojo validate` | Agent Plugins / skill checks, untracked folders, drift, floating MCP references, forbidden risk tier |
 | `skill-dojo marketplace add <url> [--ref TAG] [--name]` / `update <url> [--ref TAG]` | Consumer side: `git subtree` of a marketplace into `.agents/<name>` plus `.agents/skills` and `.claude/skills` links (replaces `add-skills.sh`) |
-| `skill-dojo serve [--port 8080] [--repo <dir>]` | Local web UI on `127.0.0.1` (needs `skill-dojo[web]`): changes, sources, plugins, marketplace preview, releases, clients, audit. It calls the same core functions as the CLI |
+| `skill-dojo serve [--port 8080] [--repo <dir>] [--reload]` | Local web UI on `127.0.0.1` (needs `skill-dojo[web]`): changes, sources, plugins, marketplace preview, releases, revoke, audit. It calls the same core functions as the CLI. `--reload` runs Reflex in dev mode with hot reload (backend on port + 1) |
 
 ### Curated repo files
 
@@ -77,7 +78,7 @@ uv run skill-dojo --help
   file `sha256` (plus `normalizedSha256` for `SKILL.md` and `plugin.json`, so stamped
   metadata is never drift)
 - `registry/sources.yaml`, `channel-policy.yaml` (default risk tier and data
-  classification), `clients.yaml`
+  classification)
 - `.skill-dojo/cache/`: cached upstream catalogs and checkouts; it ignores itself
 - Older repos with `kind: bundle`, `approvals.yaml` or staging channels still load;
   `build` rewrites them

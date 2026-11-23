@@ -2,8 +2,8 @@
 half of ``sync``.
 
 A local plugin holds hand-written files and, optionally, parts copied from
-upstream plugins (or from this repo's other local plugins). Every command is one
-commit on the work branch; ``build`` locks the files and bumps the version.
+upstream plugins (or from this repo's other local plugins). Every command only
+changes files on the work branch; ``build`` locks the files and bumps the version.
 """
 
 import logging
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from skill_dojo_core import builder, git, jsontext, versions
-from skill_dojo_core.branches import commit_work, editing
+from skill_dojo_core.branches import editing
 from skill_dojo_core.commands.items import register_local
 from skill_dojo_core.commands.mirror import ChangeResult, flags_against_main
 from skill_dojo_core.context import Context
@@ -83,10 +83,9 @@ def plugin_new(
         reg = Registry.load(ctx.repo)
         create_plugin(reg, item_id, description, category)
         builder.apply_build(Registry.load(ctx.repo))
-        commit = commit_work(ctx, f"plugin new {item_id}")
     ctx.report(f"Created {builder.plugin_dir(item_id)}; add files, then 'build'")
     log.info("Created local plugin %s", item_id)
-    return ChangeResult(item=item_id, status="created", commit=commit)
+    return ChangeResult(item=item_id, status="created")
 
 
 # --- parts -----------------------------------------------------------------------
@@ -213,10 +212,6 @@ def add_parts(  # noqa: PLR0913
         result = change_parts(ctx, item, Change(add=specs))
         if create:
             result = result.model_copy(update={"status": "created"})
-        added = ", ".join(f"{s.kind}/{s.name}" for s in specs)
-        result = result.model_copy(
-            update={"commit": commit_work(ctx, f"add-parts {item_id} {added}".rstrip())}
-        )
     ctx.report(f"Added {len(specs)} part(s) to {item_id}")
     return result
 
@@ -228,10 +223,7 @@ def remove_parts(ctx: Context, item_id: str, parts: list[str]) -> ChangeResult:
         raise InvalidInputError("give at least one part")
     with editing(ctx):
         item = _local_item(Registry.load(ctx.repo), item_id)
-        result = change_parts(ctx, item, Change(remove=specs))
-        gone = ", ".join(f"{s.kind}/{s.name}" for s in specs)
-        commit = commit_work(ctx, f"remove-parts {item_id} {gone}")
-    return result.model_copy(update={"commit": commit})
+        return change_parts(ctx, item, Change(remove=specs))
 
 
 def refresh_parts(ctx: Context, item_id: str) -> ChangeResult:

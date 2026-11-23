@@ -1,4 +1,4 @@
-"""Parts of local plugins, clients, revoke and release on the work branch."""
+"""Parts of local plugins, revoke and release on the work branch."""
 
 import json
 
@@ -11,9 +11,6 @@ from skill_dojo_core import (
     InvalidInputError,
     NotFoundError,
     add_parts,
-    clients_add,
-    clients_list,
-    clients_remove,
     finish,
     mirror,
     plugin_new,
@@ -189,7 +186,7 @@ def test_versions_bump_once_per_branch(
         finish(admin, levels=["kit"])
 
 
-def test_clients_revoke_and_rollback(
+def test_revoke_and_rollback(
     admin: Context, upstreams: tuple[FixtureRepo, ...], fake_github: FakeGitHub
 ) -> None:
     ap, _ = upstreams
@@ -199,19 +196,9 @@ def test_clients_revoke_and_rollback(
     sync(admin, item="hello")
     second = ship(admin, fake_github)
     assert second == "marketplace-v2026.11.21.2"
-    clients_add(admin, "old", first, contact="a@example.invalid")
-    clients_add(admin, "new", second)
-    clients_add(admin, "lost", "missing-tag")
-    with pytest.raises(ConflictError):
-        clients_add(admin, "old", first)
-    with pytest.raises(InvalidInputError):
-        clients_add(admin, "x", "--upload-pack=x")
-    assert [c.name for c in clients_list(admin).clients] == ["old", "new", "lost"]
 
     rolled = revoke(admin, "hello", to=first)
     assert rolled.action == "rolled-back"
-    assert [c.name for c in rolled.affected_clients] == ["new"]
-    assert [c.name for c in rolled.unknown_clients] == ["lost"]
     assert "quarantined: true" in (admin.repo / "registry/items.yaml").read_text()
     first_lock = LockFile.model_validate_json(
         git(admin.repo, "show", f"{first}:registry/lock.json")
@@ -230,9 +217,6 @@ def test_clients_revoke_and_rollback(
     assert not (admin.repo / "plugins/hello").exists()
     with pytest.raises(NotFoundError):
         revoke(admin, "nope")
-    clients_remove(admin, "lost")
-    with pytest.raises(NotFoundError):
-        clients_remove(admin, "lost")
     assert validate(admin).ok
     assert release(admin).status == "up-to-date"
 
@@ -255,11 +239,12 @@ def test_lock_and_part_paths_are_validated() -> None:
     assert Part(kind="hook", name="PreToolUse").kind == "hook"
 
 
-def test_failed_command_rolls_back_and_commits_skip_own_edits(
+def test_failed_command_rolls_back_to_the_uncommitted_edits(
     admin: Context, upstreams: tuple[FixtureRepo, ...]
 ) -> None:
     del upstreams
-    plugin_new(admin, "own")
+    plugin_new(admin, "own")  # uncommitted, like every command's changes
+    head = git(admin.repo, "rev-parse", "HEAD")
     notes = admin.repo / "NOTES.md"
     notes.write_text("my draft\n")
     with pytest.raises(NotFoundError):
@@ -267,13 +252,16 @@ def test_failed_command_rolls_back_and_commits_skip_own_edits(
             admin, "kit", ["ap:hello/skill/greet", "ap:hello/skill/nope"], create=True
         )
     assert not (admin.repo / "plugins/kit").exists()
-    assert "kit" not in (admin.repo / "registry/items.yaml").read_text()
+    items = (admin.repo / "registry/items.yaml").read_text()
+    assert "kit" not in items
+    assert "own" in items
     assert notes.read_text() == "my draft\n"
     mirror(admin, "ap", "hello")
-    assert "NOTES.md" not in git(admin.repo, "show", "--name-only", "--format=", "HEAD")
-    assert git(admin.repo, "status", "--porcelain") == "?? NOTES.md"
+    assert git(admin.repo, "rev-parse", "HEAD") == head
     finish(admin)
-    assert "NOTES.md" in git(admin.repo, "show", "--name-only", "--format=", "HEAD")
+    committed = git(admin.repo, "show", "--name-only", "--format=", "HEAD")
+    assert "NOTES.md" in committed
+    assert "plugins/own/.claude-plugin/plugin.json" in committed
 
 
 def test_release_publishes_a_missing_github_release(

@@ -38,6 +38,7 @@ class AppState(rx.State):
     notice_ok: bool = True
     busy: bool = False
     progress: str = ""
+    working: str = ""
 
     @rx.var
     def initial(self) -> str:
@@ -51,6 +52,15 @@ class AppState(rx.State):
 
     def _fail(self, exc: Exception) -> None:
         self._say(failure(exc), ok=False)
+
+    @rx.event
+    def start_work(self, key: str) -> None:
+        """Mark the control ``key`` as busy; its spinner shows until ``end_work``."""
+        self.working = key
+
+    @rx.event
+    def end_work(self) -> None:
+        self.working = ""
 
     @rx.event
     def dismiss(self) -> None:
@@ -85,7 +95,7 @@ class AppState(rx.State):
                 async with self:
                     self.progress = lines[-1] if lines else self.progress
             result = task.result()
-            changed = [c.item for c in result.changes if c.commit]
+            changed = result.changed
             async with self:
                 self.synced = "Synced just now"
                 self._say(

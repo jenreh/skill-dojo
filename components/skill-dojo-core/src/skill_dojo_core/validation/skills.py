@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from skill_dojo_core import frontmatter
+from skill_dojo_core import frontmatter, layout
 from skill_dojo_core.models import RegistryConfig
 from skill_dojo_core.validation.report import Collector
 
@@ -131,14 +131,20 @@ def validate_skill(
 
 
 def skill_folders(plugin: Path) -> list[Path]:
+    """Every folder in ``skills/`` plus the skills the manifest lists elsewhere."""
     root = plugin / "skills"
-    if not root.is_dir():
-        return []
-    return sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink())
+    found = (
+        [p for p in root.iterdir() if p.is_dir() and not p.is_symlink()]
+        if root.is_dir()
+        else []
+    )
+    listed = layout.skill_dirs(plugin).values()
+    found += [plugin / rel for rel in listed if not rel.startswith("skills/")]
+    return sorted(found)
 
 
 def check_flat_view(repo: Path, rep: Collector) -> None:
-    """The flat ``skills/`` view mirrors ``plugins/*/skills/*`` exactly."""
+    """The flat ``skills/`` view links every skill of ``plugins/*`` exactly."""
     flat = repo / "skills"
     if flat.is_dir():
         for entry in sorted(flat.iterdir()):
@@ -146,8 +152,9 @@ def check_flat_view(repo: Path, rep: Collector) -> None:
                 rep.error(
                     f"skills/{entry.name}", "broken link (run 'skill-dojo build')"
                 )
-    for folder in sorted((repo / "plugins").glob("*/skills/*")):
-        if folder.is_dir() and not (flat / folder.name).exists():
+    plugins = sorted(p for p in (repo / "plugins").glob("*") if p.is_dir())
+    for folder in (f for p in plugins for f in skill_folders(p)):
+        if not (flat / folder.name).exists():
             rep.error(
                 f"skills/{folder.name}",
                 f"missing link to {folder.relative_to(repo).as_posix()} "

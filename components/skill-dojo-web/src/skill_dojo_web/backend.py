@@ -4,6 +4,8 @@
 ``settings.github`` with a fake; nothing else differs from the CLI.
 """
 
+import asyncio
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -12,6 +14,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from skill_dojo_core import Context, GhCli, GitHub, NotFoundError
+
+log = logging.getLogger(__name__)
 
 REPO_ENV = "SKILL_DOJO_REPO"
 
@@ -43,6 +47,19 @@ def actor(repo: Path, github: GitHub) -> str:
     if repo not in settings.actors:
         settings.actors[repo] = github.current_user()
     return settings.actors[repo]
+
+
+async def warm_actor() -> None:
+    """Ask ``gh`` for the login in a worker thread at startup.
+
+    ``gh api user`` is a network call; asked inside the first page load it
+    blocks the event loop. A failure here is left for that load to report.
+    """
+    try:
+        repo = repo_path()
+        await asyncio.to_thread(actor, repo, settings.github(repo))
+    except Exception as exc:  # noqa: BLE001 (the page load reports it)
+        log.debug("Actor prefetch failed: %s", exc)
 
 
 def make_context(progress: Callable[[str], None] | None = None) -> Context:

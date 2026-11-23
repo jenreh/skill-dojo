@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from skill_dojo_core import builder, versions
-from skill_dojo_core.branches import commit_work, editing
+from skill_dojo_core.branches import editing
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import InvalidInputError, NotFoundError
 from skill_dojo_core.models import ItemKind, ItemLock, LockFile
@@ -139,7 +139,6 @@ def set_version(
         reg = Registry.load(ctx.repo)
         wanted = write_version(reg, item_id, checked, exact)
         builder.apply_build(Registry.load(ctx.repo))
-        commit_work(ctx, f"version {item_id} {wanted}")
     found = {p.item: p for p in pending_versions(ctx)}
     if item_id in found:
         return found[item_id]

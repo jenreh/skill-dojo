@@ -12,7 +12,6 @@ from pathlib import Path
 
 from skill_dojo_core import builder, git
 from skill_dojo_core.branches import (
-    commit_work,
     editing,
     main_branch,
     remote_start,
@@ -25,7 +24,7 @@ from skill_dojo_core.errors import (
     NotFoundError,
     ValidationFailedError,
 )
-from skill_dojo_core.models import Client, ItemsFile, LockFile
+from skill_dojo_core.models import ItemsFile, LockFile
 from skill_dojo_core.registry import ITEMS, LOCK, Registry, model_at
 from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
@@ -48,9 +47,6 @@ class ReleaseResult(Result):
 class RevokeResult(Result):
     item: str
     action: str  # removed | rolled-back
-    commit: str | None = None
-    affected_clients: list[Client] = []
-    unknown_clients: list[Client] = []
 
 
 def fetch_tags(repo: Path) -> None:
@@ -194,24 +190,8 @@ def resolve(repo: Path, ref: str) -> str | None:
     return None
 
 
-def affected(
-    repo: Path, clients: list[Client], item_id: str, kept: str | None
-) -> tuple[list[Client], list[Client]]:
-    """Clients whose ref holds the item in a content other than ``kept``."""
-    hit, unknown = [], []
-    for client in clients:
-        commit = resolve(repo, client.ref) if git.is_ref(client.ref) else None
-        if commit is None:
-            unknown.append(client)
-            continue
-        entry = model_at(repo, commit, LOCK, LockFile).items.get(item_id)
-        if entry is not None and entry.tree_sha256 != kept:
-            hit.append(client)
-    return hit, unknown
-
-
-def _roll_back(reg: Registry, item_id: str, commit: str) -> str:
-    """Restore ``item_id`` as it is at ``commit``; returns its treeSha256."""
+def _roll_back(reg: Registry, item_id: str, commit: str) -> None:
+    """Restore ``item_id`` as it is at ``commit``."""
     repo = reg.repo
     item = model_at(repo, commit, ITEMS, ItemsFile).get(item_id)
     lock = model_at(repo, commit, LOCK, LockFile).items.get(item_id)
@@ -226,7 +206,6 @@ def _roll_back(reg: Registry, item_id: str, commit: str) -> str:
     item.quarantined = True
     reg.items.items = [i if i.id != item_id else item for i in reg.items.items]
     reg.lock.items[item_id] = lock
-    return lock.tree_sha256
 
 
 def _remove(reg: Registry, item_id: str) -> None:
@@ -237,7 +216,7 @@ def _remove(reg: Registry, item_id: str) -> None:
 
 def revoke(ctx: Context, item_id: str, *, to: str | None = None) -> RevokeResult:
     """Remove the item, or roll it back to its content at ``to`` (a tag or ref)
-    and quarantine it, as a commit on the work branch."""
+    and quarantine it, on the work branch (not committed)."""
     with editing(ctx):
         fetch_tags(ctx.repo)
         target = None
@@ -248,21 +227,14 @@ def revoke(ctx: Context, item_id: str, *, to: str | None = None) -> RevokeResult
         reg = Registry.load(ctx.repo)
         if reg.items.get(item_id) is None:
             raise NotFoundError(f"no item '{item_id}' in registry/items.yaml")
-        kept = _roll_back(reg, item_id, target) if target else None
         if target is None:
             _remove(reg, item_id)
+        else:
+            _roll_back(reg, item_id, target)
         reg.save_items()
         reg.save_lock()
         builder.apply_build(Registry.load(ctx.repo))
         action = "rolled-back" if target else "removed"
-        commit = commit_work(ctx, f"revoke {item_id} ({action})")
-    hit, unknown = affected(ctx.repo, reg.clients.clients, item_id, kept)
     ctx.report(f"Revoked {item_id} ({action}); finish to open the PR")
     log.info("Revoke %s: %s", item_id, action)
-    return RevokeResult(
-        item=item_id,
-        action=action,
-        commit=commit,
-        affected_clients=hit,
-        unknown_clients=unknown,
-    )
+    return RevokeResult(item=item_id, action=action)

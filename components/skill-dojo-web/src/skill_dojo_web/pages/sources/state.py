@@ -30,10 +30,10 @@ class SourcesState(AppState):
     sources: list[dict[str, Any]] = []
     selected: str = ""
     commit: str = ""
+    version: str = ""
     plugins: list[dict[str, Any]] = []
     query: str = ""
     kind: str = "all"
-    focus: str = ""
     adding: bool = False
     new_id: str = ""
     new_repo: str = ""
@@ -41,30 +41,40 @@ class SourcesState(AppState):
     cached: bool = False
     expanded: str = ""
     part_rows: list[dict[str, Any]] = []
-    picked: list[str] = []
-    dialog: bool = False
     local_plugins: list[str] = []
-    target: str = NEW
+    owners: dict[str, str] = {}
+    targets: dict[str, str] = {}
+    pending: str = ""
+    dialog: bool = False
     target_name: str = ""
 
     @rx.var
     def target_options(self) -> list[dict[str, str]]:
         return [
-            {"value": NEW, "label": "New plugin"},
+            {"value": NEW, "label": "New plugin…"},
             *({"value": p, "label": p} for p in self.local_plugins),
         ]
 
     @rx.var
-    def creating(self) -> bool:
-        return self.target == NEW
+    def part_list(self) -> list[dict[str, Any]]:
+        """The parts with their switch (in a local plugin?) and own select value."""
+        return [
+            {
+                **r,
+                "on": r["spec"] in self.owners,
+                "target": self.owners.get(r["spec"])
+                or self.targets.get(r["spec"], NEW),
+            }
+            for r in self.part_rows
+        ]
 
     @rx.var
-    def picked_count(self) -> int:
-        return len(self.picked)
+    def pending_name(self) -> str:
+        return self.pending.rsplit("/", 1)[-1]
 
     @rx.var
-    def cannot_add(self) -> bool:
-        return not self.picked or (self.target == NEW and not self.target_name.strip())
+    def cannot_create(self) -> bool:
+        return not self.target_name.strip()
 
     @rx.var
     def source(self) -> dict[str, Any]:
@@ -93,6 +103,7 @@ class SourcesState(AppState):
                 "id": s.id,
                 "type": TYPE_LABEL[s.type.value],
                 "repository": s.repository,
+                "url": core.web_url(s.repository),
                 "where": s.repository.removeprefix("https://")
                 if s.type is SourceType.MCP_REGISTRY
                 else f"@{s.ref}"
@@ -107,8 +118,8 @@ class SourcesState(AppState):
 
     def _browse(self, source_id: str, refresh: bool = False) -> None:
         if source_id != self.selected:
-            self.expanded, self.part_rows, self.picked = "", [], []
-        self.selected, self.focus = source_id, ""
+            self.expanded, self.part_rows = "", []
+        self.selected = source_id
         try:
             result = core.browse(self._ctx(), source_id, refresh=refresh)
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
@@ -116,6 +127,7 @@ class SourcesState(AppState):
             self._fail(exc)
             return
         self.commit = result.commit[:7]
+        self.version = result.version or ""
         self.cached = result.cached
         self.plugins = [
             {
@@ -157,50 +169,84 @@ class SourcesState(AppState):
                 "spec": p.spec,
                 "name": p.name,
                 "kind": PART_LABEL.get(p.kind, p.kind),
+                "description": p.description,
+                "version": p.version or "",
             }
             for p in found
         ]
+        self._load_owners()
 
-    @rx.event
-    def toggle_pick(self, spec: str) -> None:
-        self.picked = (
-            [s for s in self.picked if s != spec]
-            if spec in self.picked
-            else [*self.picked, spec]
-        )
-
-    @rx.event
-    def open_dialog(self) -> None:
+    def _load_owners(self) -> None:
+        """Which local plugin holds each part (by ``source:plugin/kind/name``)."""
         try:
-            self.local_plugins = core.plugins_overview(self._ctx()).local
+            overview = core.plugins_overview(self._ctx())
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
             return
-        self.dialog = True
+        self.local_plugins = overview.local
+        self.owners = {
+            part.spec: p.id
+            for p in overview.plugins
+            if p.id in overview.local
+            for part in p.parts
+        }
+
+    def _changed(self) -> None:
+        self._load_owners()
+        self._browse(self.selected)
+
+    @rx.event
+    def set_part_target(self, spec: str, value: str) -> None:
+        self.targets = {**self.targets, spec: value or NEW}
+
+    @rx.event
+    def toggle_part(self, spec: str, on: bool) -> None:
+        """On: add the part to its selected plugin (or a new one); off: remove it."""
+        owner = self.owners.get(spec)
+        if on == bool(owner):
+            return
+        part = "/".join(spec.rsplit("/", 2)[1:])
+        if owner:
+            try:
+                core.remove_parts(self._ctx(), owner, [part])
+                self._say(f"Removed {part} from {owner}")
+                self.targets = {**self.targets, spec: owner}
+            except Exception as exc:  # noqa: BLE001 (shown in the UI)
+                self._fail(exc)
+            self._changed()
+            return
+        target = next(r["target"] for r in self.part_list if r["spec"] == spec)
+        if target == NEW:
+            self.pending, self.dialog = spec, True
+            return
+        try:
+            core.add_parts(self._ctx(), target, [spec])
+            self._say(f"Added {part} to {target}")
+        except Exception as exc:  # noqa: BLE001 (shown in the UI)
+            self._fail(exc)
+        self._changed()
 
     @rx.event
     def close_dialog(self) -> None:
-        self.dialog = False
-
-    @rx.event
-    def set_target(self, value: str) -> None:
-        self.target = value or NEW
+        self.dialog, self.pending = False, ""
 
     @rx.event
     def set_target_name(self, value: str) -> None:
         self.target_name = value
 
     @rx.event
-    def add_to_plugin(self) -> None:
-        create = self.target == NEW
-        name = self.target_name.strip() if create else self.target
+    def create_plugin(self) -> None:
+        """Create the named plugin with the part whose switch was turned on."""
+        name = self.target_name.strip()
         try:
-            result = core.add_parts(self._ctx(), name, self.picked, create=create)
-            self._say(f"{result.item}: {result.status} with {len(self.picked)} part(s)")
-            self.picked, self.dialog, self.target_name = [], False, ""
+            result = core.add_parts(self._ctx(), name, [self.pending], create=True)
+            self._say(f"{result.item}: {result.status} with {self.pending_name}")
+            self.targets = {**self.targets, self.pending: name}
+            self.target_name = ""
+            self.dialog, self.pending = False, ""
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-        self._browse(self.selected)
+        self._changed()
 
     @rx.event
     def set_query(self, value: str) -> None:
@@ -209,10 +255,6 @@ class SourcesState(AppState):
     @rx.event
     def set_kind(self, value: str) -> None:
         self.kind = value
-
-    @rx.event
-    def set_focus(self, value: str) -> None:
-        self.focus = value
 
     @rx.event
     def toggle_add(self) -> None:

@@ -19,6 +19,7 @@ from skill_dojo_core import (
     git,
     hashing,
     jsontext,
+    layout,
     metadata,
     versions,
     workflows,
@@ -128,13 +129,16 @@ def provenance(  # noqa: PLR0917
     lock: ItemLock,
     manifest: dict[str, Any],
     skill: str | None = None,
+    skill_path: str | None = None,
 ) -> metadata.Provenance:
     """The provenance stamped into an item's manifest or one of its skills.
 
+    ``skill_path`` is the skill's folder in the plugin (``skills/<skill>``).
     A skill that is a part of a local plugin carries the upstream of its part.
     """
     upstream = lock.upstream
-    source_path = f"{upstream.path}/skills/{skill}" if skill else None
+    folder = skill_path or f"skills/{skill}"
+    source_path = f"{upstream.path}/{folder}" if skill else None
     part = next(
         (p for p in lock.parts if skill and p.kind == "skill" and p.name == skill),
         None,
@@ -363,20 +367,14 @@ class PluginBuild:
             full, metadata.stamped_manifest(text, self.reg.config.namespace, prov)
         )
 
-    def skill_names(self) -> list[str]:
-        root = self.reg.repo / self.base / "skills"
-        if root.is_symlink() or not root.is_dir():
-            return []
-        return sorted(
-            p.name
-            for p in root.iterdir()
-            if p.is_dir() and not p.is_symlink() and (p / "SKILL.md").is_file()
-        )
+    def skill_dirs(self) -> dict[str, str]:
+        """Skill name -> its folder in the plugin, sorted by name."""
+        return dict(sorted(layout.skill_dirs(self.reg.repo / self.base).items()))
 
     def skills(self) -> None:
         manifest = self.manifest_data()
-        for name in self.skill_names():
-            skill_md = self.rel(f"skills/{name}/SKILL.md")
+        for name, folder in self.skill_dirs().items():
+            skill_md = self.rel(f"{folder}/SKILL.md")
             text = self.overlay.read_text(skill_md) or ""
             if self.lock is not None and frontmatter.split(text) is not None:
                 prov = provenance(
@@ -386,16 +384,17 @@ class PluginBuild:
                     self.lock,
                     manifest,
                     skill=name,
+                    skill_path=folder,
                 )
                 text = metadata.stamped_skill(text, self.reg.config.namespace, prov)
                 self.overlay.write(skill_md, text)
-            self.openai_yaml(name, text)
+            self.openai_yaml(name, folder, text)
 
-    def openai_yaml(self, name: str, skill_text: str) -> None:
+    def openai_yaml(self, name: str, folder: str, skill_text: str) -> None:
         branding = self.reg.config.branding
         if branding is None or not branding.openai_yaml_stubs:
             return
-        path = f"skills/{name}/agents/openai.yaml"
+        path = f"{folder}/agents/openai.yaml"
         if self.generated(path):
             text = stub_yaml(name, skill_text, self.icon_ref(), branding.brand_color)
             self.write(path, text)
@@ -403,7 +402,7 @@ class PluginBuild:
             text = self.overlay.read_text(self.rel(path)) or ""
         icon = self.icon_ref()
         if icon and icon in text:
-            self.copy_icon(f"skills/{name}/assets/{PurePosixPath(icon).name}")
+            self.copy_icon(f"{folder}/assets/{PurePosixPath(icon).name}")
 
 
 def with_schema(text: str, schema: str = PLUGIN_SCHEMA) -> str:
@@ -448,11 +447,11 @@ def stub_yaml(
 
 
 def flat_skills(reg: Registry, overlay: Overlay) -> None:
-    """``skills/<name>`` -> ``../plugins/<plugin>/skills/<name>`` for every skill."""
+    """``skills/<name>`` -> ``../plugins/<plugin>/<folder>`` for every skill."""
     wanted: dict[str, str] = {}
     for item in reg.items.items:
-        for name in PluginBuild(reg, overlay, item).skill_names():
-            target = f"../{plugin_dir(item.id)}/skills/{name}"
+        for name, folder in PluginBuild(reg, overlay, item).skill_dirs().items():
+            target = f"../{plugin_dir(item.id)}/{folder}"
             if name in wanted and wanted[name] != target:
                 raise InvalidInputError(
                     f"skill '{name}' exists in two plugins; the flat view needs "

@@ -15,7 +15,7 @@ PAGES = [
     ("plugins", "/plugins", "layers", "Plugins"),
     ("preview", "/preview", "eye", "Marketplace preview"),
     ("releases", "/releases", "tag", "Releases"),
-    ("clients", "/clients", "users", "Clients"),
+    ("revoke", "/revoke", "shield-x", "Revoke"),
     ("audit", "/audit", "clock", "Audit"),
 ]
 

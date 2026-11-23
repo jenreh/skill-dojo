@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from skill_dojo_cli import clients, items, release, repo, serve, sources
+from skill_dojo_cli import items, release, repo, serve, sources
 from skill_dojo_cli.errors import exit_code_for
 from skill_dojo_core import SkillDojoError
 
@@ -63,7 +63,6 @@ app.command()(release.revoke)
 app.command()(repo.build)
 app.command()(repo.validate)
 app.command()(repo.flags)
-app.add_typer(clients.clients_app, name="clients")
 app.add_typer(repo.marketplace_app, name="marketplace")
 app.command()(serve.serve)
 

@@ -17,8 +17,8 @@ from skill_dojo_core import (
     source_add,
     sync,
 )
-from skill_dojo_core.models import ItemsFile, LockFile
-from skill_dojo_core.registry import ITEMS, model_at
+from skill_dojo_core.models import LockFile
+from skill_dojo_core.registry import Registry
 from tests.support.fake_github import FakeGitHub
 from tests.support.fake_mcp_registry import FakeMcpRegistry, npm, oci, pypi
 from tests.support.fixture_repos import FixtureRepos, git
@@ -130,7 +130,6 @@ def test_wrapper_plugin_is_pinned_and_sync_follows_new_versions(
     (update,) = sync(admin).changes
     assert update.status == "updated"
     assert update.pin == "npm:@acme/weather-mcp@1.1.0"
-    assert update.commit is not None
     assert {f.kind for f in update.flags} >= {"mcp-server-added"}
     assert read(admin, "plugins/weather/plugin.json")["version"] == "1.1.0"
 
@@ -153,8 +152,7 @@ def test_pypi_and_oci_servers_pin_version_and_digest(
         "args": ["run", "-i", "--rm", "-e", "ROOT", image],
         "env": {"ROOT": "${ROOT}"},
     }
-    items = model_at(admin.repo, "HEAD", ITEMS, ItemsFile)
-    kit_item = items.get("kit")
+    kit_item = Registry.load(admin.repo).items.get("kit")
     assert kit_item is not None
     (part,) = kit_item.parts
     assert (part.source, part.upstream_plugin) == ("mcp", FILES)

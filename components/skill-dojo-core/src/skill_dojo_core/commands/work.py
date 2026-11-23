@@ -197,7 +197,7 @@ def finish(
         work, main = work_branch(reg), main_branch(reg)
         _set_levels(reg, chosen)
         builder.apply_build(Registry.load(ctx.repo))
-        commit = commit_work(ctx, "finish", everything=True)
+        commit = commit_work(ctx, "finish")
         main_ref = f"refs/remotes/origin/{main}"
         if git.run(ctx.repo, "rev-parse", "HEAD^{tree}") == git.run(
             ctx.repo, "rev-parse", f"{main_ref}^{{tree}}"
@@ -206,7 +206,7 @@ def finish(
         if push_work(ctx, work):
             # origin had commits (sync) that were merged: build the union again.
             builder.apply_build(Registry.load(ctx.repo))
-            commit = commit_work(ctx, "finish", everything=True) or commit
+            commit = commit_work(ctx, "finish") or commit
             push_work(ctx, work)
         pending = pending_versions(ctx)
         flag_text = flags(ctx, base=main_ref).markdown

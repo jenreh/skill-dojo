@@ -1,7 +1,7 @@
 """``mirror``, the mirror half of ``sync``, and ``flags``.
 
 A mirror is vendored at its pinned commit straight into the work branch: the
-plugin files, the item and lock entry and the upstream metadata, as one commit.
+plugin files, the item and lock entry and the upstream metadata (not committed).
 """
 
 import logging
@@ -9,12 +9,7 @@ import tempfile
 from pathlib import Path
 
 from skill_dojo_core import builder, hashing, mcp_registry, risk
-from skill_dojo_core.branches import (
-    check_clean_folder,
-    commit_work,
-    editing,
-    short_pin,
-)
+from skill_dojo_core.branches import MAX_DIRTY, editing, short_pin
 from skill_dojo_core.commands.sources import get_source
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError, NotFoundError
@@ -51,7 +46,6 @@ class ChangeResult(Result):
     status: str  # added | updated | created | removed | rolled-back | up-to-date
     #              | unchanged | quarantined
     pin: str = ""
-    commit: str | None = None
     flags: list[RiskFlag] = []
 
 
@@ -117,6 +111,20 @@ def _record(reg: Registry, item_id: str, source: Source, fetched: Fetched) -> No
     builder.apply_build(reg)
 
 
+def _check_untouched(reg: Registry, item_id: str, lock: ItemLock) -> None:
+    """Refuse to replace a mirror whose files were edited since ``lock.json``."""
+    folder = builder.plugin_dir(item_id)
+    current = hashing.hash_tree(
+        reg.repo / folder, reg.config.namespace, exclude=lock.generated
+    )
+    found = hashing.drift(lock.files, current)
+    if found:
+        shown = ", ".join(f"{folder}/{d.path}" for d in found[:MAX_DIRTY])
+        raise ConflictError(
+            f"{folder} was edited since lock.json ({shown}); undo the edits first"
+        )
+
+
 def vendor_mirror(
     ctx: Context, source: Source, name: str, item_id: str
 ) -> ChangeResult:
@@ -139,7 +147,8 @@ def vendor_mirror(
         check_representable(item_id, files)
         ns = reg.config.namespace
         root = ctx.repo / builder.plugin_dir(item_id)
-        check_clean_folder(ctx.repo, builder.plugin_dir(item_id))
+        if old is not None:
+            _check_untouched(reg, item_id, old)
         skip = set(old.generated) if old else set()
         before = tree_of(root, ns, skip) if root.is_dir() and old else {}
         vendor_into(root, files)
@@ -159,7 +168,7 @@ def vendor_mirror(
 def mirror(
     ctx: Context, source_id: str, plugin: str, *, item_id: str | None = None
 ) -> ChangeResult:
-    """Mirror one upstream plugin as a commit on the work branch."""
+    """Mirror one upstream plugin into the work branch (not committed)."""
     with editing(ctx):
         reg = Registry.load(ctx.repo)
         source = get_source(reg, source_id)
@@ -172,13 +181,6 @@ def mirror(
         if (ctx.repo / builder.plugin_dir(item_id)).exists():
             raise ConflictError(f"{builder.plugin_dir(item_id)} already exists")
         result = vendor_mirror(ctx, source, plugin, item_id)
-        result = result.model_copy(
-            update={
-                "commit": commit_work(
-                    ctx, f"mirror {item_id} {short_pin(result.pin)}".rstrip()
-                )
-            }
-        )
     ctx.report(f"Mirrored {item_id} at {short_pin(result.pin)}")
     log.info("Mirrored %s at %s", item_id, result.pin)
     return result

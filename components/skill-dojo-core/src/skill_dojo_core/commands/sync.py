@@ -1,14 +1,14 @@
-"""``sync``: upstream updates as commits on the work branch.
+"""``sync``: upstream updates written into the work branch (not committed).
 
 Every source's cached catalog is fetched again first. Then each mirror, and
-each local plugin with parts, is fetched at its source's ref; one that moved
-becomes one commit. Quarantined items are skipped. Running it twice changes
+each local plugin with parts, is fetched at its source's ref; one that moved is
+rewritten. Quarantined items are skipped. Running it twice changes
 nothing the second time.
 """
 
 import logging
 
-from skill_dojo_core.branches import commit_work, editing
+from skill_dojo_core.branches import editing
 from skill_dojo_core.commands.mirror import ChangeResult, update_mirror
 from skill_dojo_core.commands.plugins import refresh_parts
 from skill_dojo_core.commands.sources import refresh_sources
@@ -26,6 +26,11 @@ CHANGED = frozenset({"added", "updated"})
 class SyncResult(Result):
     changes: list[ChangeResult]
     refreshed: list[str] = []
+
+    @property
+    def changed(self) -> list[str]:
+        """The items that moved to a new upstream version."""
+        return [c.item for c in self.changes if c.status in CHANGED]
 
 
 def _syncable(item: Item) -> bool:
@@ -49,10 +54,8 @@ def sync(ctx: Context, *, item: str | None = None) -> SyncResult:
                 else refresh_parts(ctx, target.id)
             )
             if result.status in CHANGED:
-                result = result.model_copy(
-                    update={"commit": commit_work(ctx, f"sync {target.id}")}
-                )
                 ctx.report(f"Updated {target.id}")
             results.append(result)
-    log.info("Sync: %d item(s) changed", sum(r.commit is not None for r in results))
-    return SyncResult(changes=results, refreshed=refreshed)
+    synced = SyncResult(changes=results, refreshed=refreshed)
+    log.info("Sync: %d item(s) changed", len(synced.changed))
+    return synced

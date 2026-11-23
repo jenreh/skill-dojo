@@ -4,7 +4,7 @@ import logging
 from pathlib import PurePosixPath
 
 from skill_dojo_core import cache, mcp_registry, sources
-from skill_dojo_core.branches import commit_work, editing
+from skill_dojo_core.branches import editing
 from skill_dojo_core.cache import CachedPlugin, PartRef, SourceIndex
 from skill_dojo_core.context import Context
 from skill_dojo_core.errors import (
@@ -25,12 +25,12 @@ log = logging.getLogger(__name__)
 
 class SourcesResult(Result):
     sources: list[Source]
-    commit: str | None = None
 
 
 class BrowseResult(Result):
     source: str
     commit: str
+    version: str | None = None
     plugins: list[UpstreamPlugin]
     parts: dict[str, list[PartRef]] = {}
     tracked: dict[str, str] = {}
@@ -77,7 +77,12 @@ def _server_index(source: Source) -> SourceIndex:
         CachedPlugin(
             plugin=mcp_registry.offered(entry, source.repository),
             parts=[
-                PartRef(kind="mcp_server", name=mcp_registry.server_key(entry.name))
+                PartRef(
+                    kind="mcp_server",
+                    name=mcp_registry.server_key(entry.name),
+                    description=entry.description,
+                    version=entry.version,
+                )
             ],
         )
         for entry in mcp_registry.list_servers(source.repository)
@@ -114,6 +119,7 @@ def index_source(ctx: Context, source: Source) -> SourceIndex:
         source=source.id,
         commit=commit,
         settings=cache.settings_key(source),
+        version=sources.marketplace_version(source, root),
         plugins=found,
     )
     cache.write_index(ctx.repo, index)
@@ -132,6 +138,7 @@ def _browse_result(
     return BrowseResult(
         source=source.id,
         commit=index.commit,
+        version=index.version,
         plugins=sorted(plugins, key=lambda p: p.name),
         parts={c.plugin.name: c.parts for c in index.plugins if c.parts is not None},
         tracked=tracked_plugins(reg, source.id),
@@ -267,9 +274,8 @@ def source_add(  # noqa: PLR0913
             index_source(ctx, source)
         reg.sources.sources.append(source)
         _save(reg)
-        commit = commit_work(ctx, f"source add {source_id}")
     ctx.report(f"Added source '{source_id}'")
-    return SourcesResult(sources=reg.sources.sources, commit=commit)
+    return SourcesResult(sources=reg.sources.sources)
 
 
 def source_list(ctx: Context) -> SourcesResult:
@@ -290,9 +296,8 @@ def source_remove(ctx: Context, source_id: str) -> SourcesResult:
             raise ConflictError(f"source '{source_id}' is used by {', '.join(users)}")
         reg.sources.sources.remove(source)
         _save(reg)
-        commit = commit_work(ctx, f"source remove {source_id}")
     cache.drop_source(ctx.repo, source_id)
-    return SourcesResult(sources=reg.sources.sources, commit=commit)
+    return SourcesResult(sources=reg.sources.sources)
 
 
 def source_allow(ctx: Context, source_id: str, plugin: str) -> SourcesResult:
@@ -303,6 +308,5 @@ def source_allow(ctx: Context, source_id: str, plugin: str) -> SourcesResult:
         if source.allowlist and plugin not in source.allowlist:
             source.allowlist.append(plugin)
             _save(reg)
-        commit = commit_work(ctx, f"source allow {source_id} {plugin}")
     ctx.report(f"Allowed '{plugin}' from '{source_id}'")
-    return SourcesResult(sources=reg.sources.sources, commit=commit)
+    return SourcesResult(sources=reg.sources.sources)

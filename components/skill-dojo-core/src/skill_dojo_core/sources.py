@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from skill_dojo_core.errors import InvalidInputError, NotFoundError
+from skill_dojo_core.layout import read_manifest, skill_roots
 from skill_dojo_core.models import Source, SourceType
 from skill_dojo_core.results import Result
 
@@ -70,6 +71,22 @@ def repo_url(repository: str) -> str:
     raise InvalidInputError(f"'{repository}' is not owner/name or a git URL")
 
 
+SSH_RE = re.compile(r"^(?:ssh://)?git@([A-Za-z0-9.-]+)[:/](\S+)$")
+
+
+def web_url(repository: str) -> str:
+    """The page a browser can open for ``repository``; ``""`` when there is none
+    (local ``file://`` repos)."""
+    if OWNER_REPO_RE.match(repository):
+        return f"{GITHUB}{repository}"
+    if match := SSH_RE.match(repository):
+        host, path = match.groups()
+        return f"https://{host}/{path.removesuffix('.git')}"
+    if repository.startswith(("https://", "http://")):
+        return repository.removesuffix(".git")
+    return ""
+
+
 def safe_path(path: str) -> str:
     """A repo-relative POSIX path without ``..`` (``.`` for the root)."""
     parts = PurePosixPath(path.removeprefix("./")).parts
@@ -97,6 +114,18 @@ REMOTE_KINDS = frozenset({"github", "url", "git", "git-subdir"})
 INLINE_KEYS = frozenset(
     {"commands", "agents", "hooks", "mcpServers", "skills", "lspServers"}
 )
+
+
+def _local_path(source: dict[str, Any]) -> str | None:
+    """Path of a plugin in the catalog's own repo: ``local`` entries, and ``url``
+    entries whose url is relative (``./``), as some Agent Plugins catalogs write."""
+    kind = source.get("source")
+    if kind == "local" and isinstance(source.get("path"), str):
+        return source["path"]
+    url = source.get("url")
+    if kind == "url" and isinstance(url, str) and url.startswith(("./", "../")):
+        return url
+    return None
 
 
 def _remote(source: dict[str, Any]) -> tuple[str, str | None, str] | None:
@@ -139,14 +168,23 @@ def _entry(
             path=safe_path(where), repository=source.repository, **common
         )
     if isinstance(where, dict):
-        if where.get("source") == "local" and isinstance(where.get("path"), str):
+        local = _local_path(where)
+        if local is not None:
             return UpstreamPlugin(
-                path=safe_path(where["path"]), repository=source.repository, **common
+                path=safe_path(local), repository=source.repository, **common
             )
         remote = _remote(where)
         if remote is not None:
             repository, ref, path = remote
-            repo_url(repository)
+            try:
+                repo_url(repository)
+            except InvalidInputError as exc:
+                return UpstreamPlugin(
+                    path=".",
+                    repository=source.repository,
+                    unsupported=str(exc),
+                    **common,
+                )
             return UpstreamPlugin(
                 path=safe_path(path), repository=repository, ref=ref, **common
             )
@@ -162,33 +200,35 @@ def _entry(
     )
 
 
-def _manifest(plugin: Path) -> dict[str, Any] | None:
-    for rel in (".claude-plugin/plugin.json", "plugin.json"):
-        try:
-            data = json.loads((plugin / rel).read_text(encoding="utf-8"))
-        except OSError, UnicodeDecodeError, json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
-            return data
-    return None
+def _from_manifest(
+    source: Source, manifest: dict[str, Any], path: str, default_name: str
+) -> UpstreamPlugin:
+    version = manifest.get("version")
+    description = manifest.get("description")
+    return UpstreamPlugin(
+        name=str(manifest.get("name") or default_name),
+        path=path,
+        repository=source.repository,
+        version=version if isinstance(version, str) else None,
+        description=description if isinstance(description, str) else None,
+    )
 
 
 def _git_plugins(source: Source, root: Path) -> list[UpstreamPlugin]:
-    """A plain repo: ``plugins/*`` with a manifest, or a root ``skills/`` folder."""
+    """A plain repo: ``plugins/*`` with a manifest, else the repo itself as one
+    plugin when it has a root manifest or a ``skills/`` folder."""
     found = []
     for plugin in sorted((root / "plugins").glob("*")):
-        manifest = _manifest(plugin) if plugin.is_dir() else None
+        manifest = read_manifest(plugin) if plugin.is_dir() else None
         if manifest is not None:
             found.append(
-                UpstreamPlugin(
-                    name=str(manifest.get("name") or plugin.name),
-                    path=f"plugins/{plugin.name}",
-                    repository=source.repository,
-                    version=manifest.get("version"),
-                    description=manifest.get("description"),
-                )
+                _from_manifest(source, manifest, f"plugins/{plugin.name}", plugin.name)
             )
-    if not found and (root / "skills").is_dir():
+    if found:
+        return found
+    if (manifest := read_manifest(root)) is not None:
+        return [_from_manifest(source, manifest, ".", source.id)]
+    if (root / "skills").is_dir():
         found.append(
             UpstreamPlugin(name=source.id, path=".", repository=source.repository)
         )
@@ -216,22 +256,32 @@ def describe(plugin: UpstreamPlugin, root: Path) -> UpstreamPlugin:
         found = data.get("mcpServers") if isinstance(data, dict) else None
         servers = len(found) if isinstance(found, dict) else 0
         break
-    manifest = _manifest(base) or {}
+    manifest = read_manifest(base) or {}
     license_ = manifest.get("license")
     return plugin.model_copy(
         update={
-            "contents": contents_summary(paths, servers),
+            "contents": contents_summary(paths, servers, skill_roots(manifest)),
             "license": license_ if isinstance(license_, str) else None,
         }
     )
 
 
-def contents_summary(paths: list[str], mcp_servers: int = 0) -> str:
-    """``3 skills · 1 MCP · 1 hook`` of a plugin's file list."""
+def contents_summary(
+    paths: list[str], mcp_servers: int = 0, roots: list[str] | None = None
+) -> str:
+    """``3 skills · 1 MCP · 1 hook`` of a plugin's file list.
+
+    A skill is ``<root>/SKILL.md`` or ``<root>/<name>/SKILL.md`` for each root.
+    """
+    wanted = set(roots or ["skills"])
     skills = {
-        p.split("/")[1]
+        skill.as_posix()
         for p in paths
-        if p.startswith("skills/") and p.endswith("/SKILL.md")
+        if (skill := PurePosixPath(p)).name == "SKILL.md"
+        and (
+            skill.parent.as_posix() in wanted
+            or skill.parent.parent.as_posix() in wanted
+        )
     }
     agents = [p for p in paths if p.startswith("agents/") and p.endswith(".md")]
     hooks = 1 if any(PurePosixPath(p).name == "hooks.json" for p in paths) else 0
@@ -247,6 +297,59 @@ def contents_summary(paths: list[str], mcp_servers: int = 0) -> str:
     return " · ".join(text) or "no components"
 
 
+def _catalog_plugins(source: Source, root: Path, rel: str) -> list[UpstreamPlugin]:
+    catalog = _read_catalog(root, rel)
+    metadata = catalog.get("metadata")
+    plugin_root = metadata.get("pluginRoot") if isinstance(metadata, dict) else None
+    if not isinstance(plugin_root, str):
+        plugin_root = None
+    return [
+        p
+        for e in catalog["plugins"]
+        if isinstance(e, dict) and (p := _entry(source, e, plugin_root)) is not None
+    ]
+
+
+def _catalog_paths(source: Source, root: Path) -> list[str]:
+    """The catalog path given, else every default catalog in the repo with the
+    source's own first: repos may list different plugins for each agent."""
+    if source.marketplace_path:
+        return [source.marketplace_path]
+    own = DEFAULT_PATHS[source.type]
+    others = [rel for rel in DEFAULT_PATHS.values() if rel != own]
+    return [own, *(rel for rel in others if (root / rel).is_file())]
+
+
+def _catalog_missing(source: Source, root: Path) -> bool:
+    """A catalog source without any catalog but with a root ``plugin.json``: a
+    single-plugin repo, read like a plain git repo. An explicit path never is."""
+    return (
+        source.type in DEFAULT_PATHS
+        and not source.marketplace_path
+        and not any((root / rel).is_file() for rel in DEFAULT_PATHS.values())
+        and read_manifest(root) is not None
+    )
+
+
+def marketplace_version(source: Source, root: Path) -> str | None:
+    """``metadata.version`` (else ``version``) of the source's first catalog."""
+    if source.type not in DEFAULT_PATHS:
+        return None
+    for rel in _catalog_paths(source, root):
+        try:
+            catalog = _read_catalog(root, rel)
+        except NotFoundError, InvalidInputError:
+            continue
+        meta = catalog.get("metadata")
+        for value in (
+            meta.get("version") if isinstance(meta, dict) else None,
+            catalog.get("version"),
+        ):
+            if isinstance(value, str):
+                return value
+    return None
+
+
 def list_plugins(
     source: Source, root: Path, *, only_allowed: bool = True
 ) -> list[UpstreamPlugin]:
@@ -255,24 +358,14 @@ def list_plugins(
     With ``only_allowed=False`` plugins outside the allowlist are listed too,
     marked ``allowed=False``.
     """
-    if source.type is SourceType.GIT:
+    if source.type is SourceType.GIT or _catalog_missing(source, root):
         plugins = _git_plugins(source, root)
     elif source.type in DEFAULT_PATHS:
-        rel = source.marketplace_path or DEFAULT_PATHS[source.type]
-        catalog = _read_catalog(root, rel)
-        metadata = catalog.get("metadata")
-        plugin_root = metadata.get("pluginRoot") if isinstance(metadata, dict) else None
-        plugins = [
-            p
-            for e in catalog["plugins"]
-            if isinstance(e, dict)
-            and (
-                p := _entry(
-                    source, e, plugin_root if isinstance(plugin_root, str) else None
-                )
-            )
-            is not None
-        ]
+        by_name: dict[str, UpstreamPlugin] = {}
+        for rel in _catalog_paths(source, root):
+            for plugin in _catalog_plugins(source, root, rel):
+                by_name.setdefault(plugin.name, plugin)
+        plugins = list(by_name.values())
     else:
         raise InvalidInputError(f"source type '{source.type.value}' has no catalog yet")
     if source.allowlist:

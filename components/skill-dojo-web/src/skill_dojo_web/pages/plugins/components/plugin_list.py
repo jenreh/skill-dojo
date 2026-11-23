@@ -3,14 +3,24 @@
 import appkit_mantine as mn
 import reflex as rx
 
-from skill_dojo_web.components.common import badge, empty, mono, panel, panel_head
+from skill_dojo_web.components.common import (
+    badge,
+    empty,
+    mono,
+    panel,
+    panel_head,
+    work,
+    working,
+)
 from skill_dojo_web.pages.plugins.state import PluginsState as S
 
 
 def _part(plugin: rx.Var, p: rx.Var) -> rx.Component:
+    key = f"remove:{plugin['id']}/{p['short']}"
     return mn.group(
         badge(p["kind_label"]),
         mono(p["name"]),
+        rx.cond(p["version"] != "", mono(p["version"])),
         mn.text(f"from {p['source']}:{p['plugin']}", size="xs", c="dimmed"),
         mono(p["commit"], c="dimmed"),
         mn.action_icon(
@@ -19,7 +29,8 @@ def _part(plugin: rx.Var, p: rx.Var) -> rx.Component:
             color="gray",
             size="sm",
             aria_label="Remove part",
-            on_click=S.remove_part(plugin["id"].to(str), p["short"].to(str)),
+            loading=working(key),
+            on_click=work(key, S.remove_part(plugin["id"].to(str), p["short"].to(str))),
         ),
         gap="xs",
         wrap="wrap",
@@ -57,6 +68,11 @@ def plugin_list() -> rx.Component:
         panel_head(
             "Plugins",
             badge(S.plugins.length()),
+            rx.cond(
+                S.marketplace_version != "",
+                badge(f"marketplace v{S.marketplace_version}", "info"),
+                badge("marketplace not released"),
+            ),
             mn.text_input(
                 placeholder="Filter",
                 aria_label="Filter plugins",

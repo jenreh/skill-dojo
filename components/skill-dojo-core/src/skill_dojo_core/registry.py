@@ -21,7 +21,6 @@ from skill_dojo_core.models import (
     LEGACY_KINDS,
     LEGACY_POLICY_KEYS,
     ChannelPolicy,
-    ClientsFile,
     ItemsFile,
     LockFile,
     RegistryConfig,
@@ -35,7 +34,6 @@ ITEMS = "items.yaml"
 # Rev. 1 only: approvals now live in the merged PR; build removes the file.
 LEGACY_APPROVALS = "approvals.yaml"
 POLICY = "channel-policy.yaml"
-CLIENTS = "clients.yaml"
 LOCK = "lock.json"
 MATCH_KEYS = ("id", "name", "item")
 
@@ -229,7 +227,6 @@ class Registry:
     sources: SourcesFile
     items: ItemsFile
     policy: ChannelPolicy
-    clients: ClientsFile
     lock: LockFile
 
     @classmethod
@@ -240,7 +237,6 @@ class Registry:
             sources=load_yaml_model(repo, SOURCES, SourcesFile),
             items=load_yaml_model(repo, ITEMS, ItemsFile),
             policy=load_yaml_model(repo, POLICY, ChannelPolicy),
-            clients=load_yaml_model(repo, CLIENTS, ClientsFile),
             lock=load_lock(repo),
         )
 

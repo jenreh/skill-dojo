@@ -26,6 +26,7 @@ from skill_dojo_core import (
     validate,
     vendoring,
 )
+from skill_dojo_core.branches import snapshot
 from skill_dojo_core.models import LockFile
 from tests.support.fixture_repos import (
     FixtureRepo,
@@ -117,8 +118,9 @@ def test_sync_flags_and_is_idempotent(
     kinds = {f.kind for f in update.flags}
     assert {"mcp-server-added", "hook", "network-endpoint"} <= kinds
     assert lock(admin).items["hello"].upstream.commit == ap.head
+    tree = snapshot(admin.repo)
     assert [c.status for c in sync(admin).changes] == ["up-to-date"]
-    assert git(admin.repo, "status", "--porcelain") == ""
+    assert snapshot(admin.repo) == tree
 
 
 def test_quarantined_items_are_skipped(
@@ -267,9 +269,10 @@ def test_upstream_commit_without_plugin_change_is_unchanged(
 ) -> None:
     ap, _ = upstreams
     mirror(admin, "ap", "hello")
+    tree = snapshot(admin.repo)
     ap.commit({"README.md": "unrelated\n"})
     assert sync(admin).changes[0].status == "unchanged"
-    assert git(admin.repo, "status", "--porcelain") == ""
+    assert snapshot(admin.repo) == tree
 
 
 def test_root_plugin_keeps_commands_agents_and_hooks(
@@ -291,12 +294,39 @@ def test_root_plugin_keeps_commands_agents_and_hooks(
     )
     source_add(admin, "root", root.url, kind=SourceType.CLAUDE_MARKETPLACE)
     result = mirror(admin, "root", "rooty")
-    files = git(admin.repo, "ls-tree", "-r", "--name-only", "HEAD")
+    plugin = admin.repo / "plugins/rooty"
     for path in ("commands/go.md", "agents/helper.md", "hooks/hooks.json", "LICENSE"):
-        assert f"plugins/rooty/{path}" in files
-    assert "plugins/rooty/.github" not in files
-    assert "plugins/rooty/.claude-plugin/marketplace.json" not in files
+        assert (plugin / path).is_file()
+    assert not (plugin / ".github").exists()
+    assert not (plugin / ".claude-plugin/marketplace.json").exists()
     assert "hook" in {f.kind for f in result.flags}
+
+
+def test_single_plugin_repo_with_manifest_skill_paths(
+    admin: Context, fixture_repos: FixtureRepos
+) -> None:
+    """No catalog, a root plugin.json listing skills outside ``skills/``."""
+    manifest = {"name": "ml", "version": "1.0.0", "skills": ["./ml-trace"]}
+    repo = fixture_repos.create(
+        "ml-skills",
+        {
+            ".claude-plugin/plugin.json": json.dumps(manifest),
+            "ml-trace/SKILL.md": skill_md("ml-trace", "Traces. Use when tracing."),
+            "LICENSE": "MIT\n",
+        },
+    )
+    config = admin.repo / "registry/config.yaml"
+    text = config.read_text().replace("flat_skills: false", "flat_skills: true")
+    config.write_text(text + "branding:\n  brand_color: '#000000'\n")
+    source_add(admin, "ml", repo.url, kind=SourceType.CLAUDE_MARKETPLACE)
+    assert [p.name for p in browse(admin, "ml").plugins] == ["ml"]
+    mirror(admin, "ml", "ml")
+    skill = admin.repo / "plugins/ml/ml-trace"
+    assert 'source-path: "./ml-trace"' in (skill / "SKILL.md").read_text()
+    assert (skill / "agents/openai.yaml").is_file()
+    assert "ml-trace/agents/openai.yaml" in lock(admin).items["ml"].generated
+    assert (admin.repo / "skills/ml-trace").resolve() == skill.resolve()
+    assert validate(admin).ok
 
 
 def test_unsupported_catalog_entry_has_a_clear_error(

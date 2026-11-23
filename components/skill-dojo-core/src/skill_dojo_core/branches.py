@@ -1,18 +1,18 @@
 """The one work branch in the admin's checkout, and read-only worktrees.
 
 Every writing command first puts the checkout on the work branch
-(``ensure_work_branch``) and ends with one commit on it (``commit_work``).
-``finish`` pushes it and opens or updates the one PR into main. The tool never
-force-pushes and never rewrites history the admin pushed.
+(``ensure_work_branch``) and only changes files there; the admin's own
+uncommitted edits come along. Nothing is committed until the admin commits or
+runs ``finish`` (``commit_work``), which pushes it and opens or updates the one
+PR into main. The tool never force-pushes and never rewrites history the admin
+pushed.
 """
 
-import hashlib
 import logging
 import re
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
-from contextvars import ContextVar
 from pathlib import Path
 
 from skill_dojo_core import git, merging
@@ -69,12 +69,12 @@ def dirty_files(repo: Path) -> list[str]:
 
 
 def check_clean_folder(repo: Path, folder: str) -> None:
-    """Refuse to replace a folder that holds uncommitted edits."""
+    """Refuse to pin parts of a folder to HEAD while it holds uncommitted edits."""
     dirty = [p for p in dirty_files(repo) if p.startswith(folder.rstrip("/") + "/")]
     if dirty:
         raise ConflictError(
             f"{folder} has uncommitted changes ({', '.join(dirty[:MAX_DIRTY])}); "
-            "commit or discard them first"
+            "a part taken from it is pinned to a commit, so commit it first"
         )
 
 
@@ -125,15 +125,17 @@ def remote_start(repo: Path, branch: str) -> str:
     return main_start(repo, branch)
 
 
-def _check_clean(repo: Path, branch: str) -> None:
+def _switch(repo: Path, branch: str, *args: str) -> None:
+    """``git checkout`` that keeps uncommitted edits; stops when they clash."""
+    if git.succeeds(repo, "checkout", "-q", *args):
+        return
     dirty = dirty_files(repo)
-    if dirty:
-        shown = ", ".join(dirty[:MAX_DIRTY])
-        more = f" and {len(dirty) - MAX_DIRTY} more" if len(dirty) > MAX_DIRTY else ""
-        raise ConflictError(
-            f"the working tree has changes ({shown}{more}); commit or stash them, "
-            f"or switch to '{branch}' first"
-        )
+    shown = ", ".join(dirty[:MAX_DIRTY])
+    more = f" and {len(dirty) - MAX_DIRTY} more" if len(dirty) > MAX_DIRTY else ""
+    raise ConflictError(
+        f"your uncommitted changes ({shown}{more}) clash with '{branch}'; "
+        "commit or stash them first"
+    )
 
 
 def _fast_forward(repo: Path, local: str, remote: str | None) -> None:
@@ -170,16 +172,16 @@ def ensure_work_branch(ctx: Context) -> WorkBranch:
     """Check out the work branch, creating it from ``origin/<main>`` when needed.
 
     - Already on it: use it as it is.
-    - Otherwise the tree must be clean. A local branch with commits that main does
-      not have is kept (unpushed work); else an unmerged ``origin/<work>`` is
-      checked out; else the branch starts fresh from ``origin/<main>``.
+    - Otherwise uncommitted edits come along (git stops when they clash). A local
+      branch with commits that main does not have is kept (unpushed work); else an
+      unmerged ``origin/<work>`` is checked out; else the branch starts fresh from
+      ``origin/<main>``.
     """
     reg = Registry.load(ctx.repo)
     work, main = work_branch(reg), main_branch(reg)
     git.check_ref(work)
     if current_branch(ctx.repo) == work:
         return _restart_if_merged(ctx, work, main)
-    _check_clean(ctx.repo, work)
     fetch(ctx.repo)
     start = (
         main_start(ctx.repo, main)
@@ -188,53 +190,53 @@ def ensure_work_branch(ctx: Context) -> WorkBranch:
     )
     local, remote = _local(ctx.repo, work), _remote(ctx.repo, work)
     if local and not git.is_ancestor(ctx.repo, local, start):
-        git.run(ctx.repo, "checkout", "-q", work)
+        _switch(ctx.repo, work, work)
         _fast_forward(ctx.repo, local, remote)
         status = "checked-out"
     elif remote and not git.is_ancestor(ctx.repo, remote, start):
-        git.run(ctx.repo, "checkout", "-q", "-B", work, "--track", remote)
+        _switch(ctx.repo, work, "-B", work, "--track", remote)
         status = "checked-out"
     else:
         # The old branch (if any) is fully merged: start again from main.
-        git.run(ctx.repo, "checkout", "-q", "--no-track", "-B", work, start)
+        _switch(ctx.repo, work, "--no-track", "-B", work, start)
         status = "created"
     ctx.report(f"On work branch {work} ({status})")
     log.info("Work branch %s: %s", work, status)
     return WorkBranch(name=work, status=status)
 
 
-# What the working tree held when a writing command started (``editing``).
-_BEFORE: ContextVar[dict[str, str] | None] = ContextVar("before", default=None)
+# What a path holds: ("file", mode, bytes), ("link", 0, target) or ("missing", 0, b"").
+type State = tuple[str, int, bytes]
 
 
-def _state(repo: Path, rel: str) -> str:
+def _state(repo: Path, rel: str) -> State:
     path = repo / rel
     if path.is_symlink():
-        return "link:" + str(path.readlink())
+        return ("link", 0, str(path.readlink()).encode())
     if path.is_file():
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    return "missing"
+        return ("file", path.stat().st_mode & 0o777, path.read_bytes())
+    return ("missing", 0, b"")
 
 
-def snapshot(repo: Path) -> dict[str, str]:
+def snapshot(repo: Path) -> dict[str, State]:
     """Every changed or untracked path with the content it has now."""
     return {rel: _state(repo, rel) for rel in dirty_files(repo)}
 
 
-def _touched(repo: Path, before: dict[str, str]) -> list[str]:
-    """Paths a command changed: newly dirty, or dirty before with new content."""
-    return [rel for rel in dirty_files(repo) if before.get(rel) != _state(repo, rel)]
+def _touched(repo: Path, before: dict[str, State]) -> list[str]:
+    """Paths a command changed: dirty now or before, and not as they were."""
+    paths = sorted({*dirty_files(repo), *before})
+    return [
+        rel for rel in paths if rel not in before or before[rel] != _state(repo, rel)
+    ]
 
 
-def commit_work(ctx: Context, message: str, *, everything: bool = False) -> str | None:
-    """Commit what the command changed on the work branch; returns the commit.
+def commit_work(ctx: Context, message: str) -> str | None:
+    """Commit every change in the working tree (``finish``); returns the commit.
 
-    The admin's own uncommitted edits stay out unless the command touched the
-    same file (``finish`` passes ``everything`` to commit them too).
     ``--no-verify``: local hooks never run on untrusted upstream content.
     """
-    before = None if everything else _BEFORE.get()
-    paths = dirty_files(ctx.repo) if before is None else _touched(ctx.repo, before)
+    paths = dirty_files(ctx.repo)
     if not paths:
         return None
     git.run(ctx.repo, "add", "-A", "--", *paths)
@@ -294,31 +296,41 @@ def editing(ctx: Context) -> Generator[WorkBranch]:
     with repo_lock(ctx.repo):
         branch = ensure_work_branch(ctx)
         before = snapshot(ctx.repo)
-        token = _BEFORE.set(before)
         try:
             yield branch
         except BaseException:
             _roll_back(ctx.repo, before)
             raise
-        finally:
-            _BEFORE.reset(token)
 
 
-def _roll_back(repo: Path, before: dict[str, str]) -> None:
-    """Undo what a failed command wrote: newly changed paths go back to HEAD.
-
-    Paths that were dirty before cannot be restored and are only reported.
-    """
+def _roll_back(repo: Path, before: dict[str, State]) -> None:
+    """Undo what a failed command wrote: every path it changed goes back to what
+    it held before (uncommitted edits included), else to HEAD."""
     git.run(repo, "reset", "-q", check=False)
     for rel in _touched(repo, before):
         if rel in before:
-            log.warning("Not undoing %s: it had your own changes", rel)
+            _restore(repo, rel, before[rel])
         elif git.succeeds(repo, "cat-file", "-e", f"HEAD:{rel}"):
             git.run(repo, "checkout", "-q", "HEAD", "--", rel)
         else:
-            (repo / rel).unlink(missing_ok=True)
-            _drop_empty_parents(repo, (repo / rel).parent)
+            _restore(repo, rel, ("missing", 0, b""))
     log.info("Rolled back the changes of a failed command")
+
+
+def _restore(repo: Path, rel: str, state: State) -> None:
+    path = repo / rel
+    kind, mode, data = state
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    if kind == "missing":
+        _drop_empty_parents(repo, path.parent)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "link":
+        path.symlink_to(data.decode())
+    else:
+        path.write_bytes(data)
+        path.chmod(mode)
 
 
 def _drop_empty_parents(repo: Path, folder: Path) -> None:

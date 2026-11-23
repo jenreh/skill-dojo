@@ -44,6 +44,8 @@ LATEST = "latest"  # the MCP Registry has no commits
 LOCK = ".lock"
 # A checkout not used for this long may be pruned; a younger one may be in use.
 PRUNE_AFTER = 3600.0
+# Bumped when the index format changes, so older cached catalogs are rebuilt.
+INDEX_FORMAT = 3
 
 
 class PartRef(Result):
@@ -51,6 +53,8 @@ class PartRef(Result):
 
     kind: str
     name: str
+    description: str = ""
+    version: str | None = None
 
 
 class CachedPlugin(Result):
@@ -62,6 +66,7 @@ class SourceIndex(Result):
     source: str
     commit: str
     settings: str
+    version: str | None = None  # the marketplace catalog's own version
     plugins: list[CachedPlugin] = []
 
 
@@ -81,7 +86,13 @@ def root(repo: Path) -> Path:
 
 def settings_key(source: Source) -> str:
     """What the cached catalog depends on (a change means: fetch again)."""
-    data = [source.type.value, source.repository, source.ref, source.marketplace_path]
+    data = [
+        INDEX_FORMAT,
+        source.type.value,
+        source.repository,
+        source.ref,
+        source.marketplace_path,
+    ]
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 

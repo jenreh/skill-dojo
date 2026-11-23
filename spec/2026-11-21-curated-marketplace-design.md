@@ -52,10 +52,11 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 3. **Pin every item** to an exact upstream commit, with a recorded archive SHA-256.
    Nothing reaches `main` until someone approves it.
 4. **One work branch.** Every change (a new mirror, new parts, a new plugin, an upstream
-   update, a revocation) is a commit on one branch in the admin's checkout
-   (`skill-dojo/changes` by default). A scheduled GitHub Action checks upstream and
-   writes each new upstream version as a commit on the same branch, never as an
-   automatic update of `main`. **One PR into `main`** carries the diff plus
+   update, a revocation) is written into one branch in the admin's checkout
+   (`skill-dojo/changes` by default). The tool never commits on its own: the admin
+   commits when they want, or `finish` commits everything. A scheduled GitHub Action
+   checks upstream, writes each new upstream version into the same branch and runs
+   `finish`, never an automatic update of `main`. **One PR into `main`** carries the diff plus
    **automatic risk flags**. Merging it is the approval.
 5. **Releases.** After the merge, an admin creates a release (CLI or UI): an immutable tag
    (`marketplace-vYYYY.MM.DD[.N]`) plus a GitHub Release with notes. Clients import
@@ -65,8 +66,7 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
    tool also generates the `.claude-plugin/` manifests for Claude Code.
 7. **A CLI** manages everything, and `serve` starts a **local web UI** for the same tasks.
 8. **Audit and revocation.** Every sync, change, merge, release and revocation can be
-   traced in git. A hand-kept list of clients shows who must be warned when something is
-   revoked.
+   traced in git.
 9. **The MCP Registry is a v1 source** (decided by the user). Browse the official MCP
    Registry. A server entry (npm, PyPI or OCI package) is pinned to an exact package
    version or image digest, and the pinned value is recorded as its `upstreamCommit` /
@@ -82,8 +82,8 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 - Locking down developer machines (managed settings, MDM). The tool only curates. Lock-down
   is handled elsewhere.
 - A hosted, shared web console with its own login. In v1 the UI is local only.
-- Detecting which workspace imported which tag. ChatGPT, Codex and Claude Code don't report
-  this, so clients are recorded by hand.
+- Tracking which workspace imported which tag. ChatGPT, Codex and Claude Code don't report
+  this, and skill-dojo does not record it.
 - A full automated security verdict (an LLM or SAST judging the code). v1 gives risk flags
   and humans decide.
 - Editing mirrored content by hand (see "Calls made").
@@ -127,7 +127,6 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 - Revocation is a normal change on the work branch.
 - Upstream catalogs are cached in the curated repo in a local folder that git ignores,
   so browsing is fast. `sync` updates the cache.
-- Clients are a hand-kept `registry/clients.yaml`, edited through the UI.
 - The UI is local only in v1.
 - Output: Agent Plugins plus Claude Code manifests.
 - Generic tool. The jenreh repo is the first user.
@@ -149,7 +148,6 @@ The jenreh `agent-skills` repo is the first real user, but the tool is generic.
 │   ├── sources.yaml          # upstream sources, refs, allow-lists, schedule
 │   ├── items.yaml            # what is mirrored or local, from where, pinned at what
 │   ├── channel-policy.yaml   # default risk tier and data classification
-│   ├── clients.yaml          # hand-kept: workspace or client -> ref/tag in use
 │   └── lock.json             # provenance: upstream repo, commit, path, sha256 per file/archive
 ├── .skill-dojo/cache/        # local only: cached upstream catalogs and checkouts (ignores itself)
 └── .github/workflows/
@@ -276,7 +274,7 @@ itself, because there is no database:
 | Scan reports, risk-flag output, large fixtures | No | PR body and comment, GitHub Actions artifact |
 | Secrets, API keys, tenant config | Never | Never in the repo: GitHub Actions secrets or local env |
 | Org policy defaults | No | `registry/channel-policy.yaml` |
-| Installation state per workspace | No | `registry/clients.yaml` (hand-kept) |
+| Installation state per workspace | No | Not tracked |
 
 **Policy effects.** `riskTier: forbidden` fails `validate`, so such an item cannot reach
 `main`. A changed `allowedTools`, or an upstream metadata change on its own, is a risk
@@ -335,7 +333,6 @@ Rules:
 | WorkBranch | the branch `skill-dojo/changes` + its one PR into `main` | All changes that are not yet approved |
 | PendingVersion | computed from the branch and `origin/main` | A changed item with its old and new version |
 | Release | git tag on `main` + GitHub Release | A tagged state of the catalogs and the plugin tree, with notes |
-| Client | `clients.yaml` | Who uses which ref or tag (hand-kept) |
 | AuditEvent | git history (commits, PRs, tags) | Derived, never stored separately |
 
 ## Flow
@@ -359,22 +356,25 @@ source add ─► cache (catalog + part index) ─► browse
   `skill-dojo/changes`).
 - Every writing command starts by making sure the admin's checkout is on the work branch:
   - Already on it: use it.
-  - Otherwise the working tree must be clean, or the command stops and names the dirty
-    files. The tool fetches `origin`. If `origin/<work>` exists and is not fully merged
+  - Otherwise the admin's uncommitted edits come along to the work branch. If git cannot
+    switch without overwriting them, the command stops and names the dirty files. The
+    tool fetches `origin`. If `origin/<work>` exists and is not fully merged
     into `origin/main`, it checks that out (tracking). If it is merged or missing, it
     creates the branch fresh from `origin/main`. A local work branch with commits that are
     not on `origin/main` yet is kept and checked out, so unpushed work is never lost.
   - The tool never force-pushes and never rewrites history the admin pushed.
-- Each writing command makes **one commit** (`skill-dojo: <action> <item>`, with
-  `--no-verify`, because local hooks must never run on upstream content). Hand edits are
-  committed by `finish`, or by the admin.
-- A command commits only the files it changed; the admin's other uncommitted edits
-  stay out of it (`finish` commits everything). A command that fails undoes what it
-  wrote, so no half-written change is committed by the next command. Mirror folders
-  and the folder of a `local:` part source must be clean, or the command stops.
+- Writing commands **never commit**. They only change files on the work branch; the
+  admin decides when to commit. `finish` commits everything left
+  (`skill-dojo: finish`, with `--no-verify`, because local hooks must never run on
+  upstream content).
+- A command that fails puts every file it touched back to what it held before,
+  uncommitted edits included, so no half-written change is left behind. A mirror whose
+  files differ from `lock.json` (hand edits) is not replaced; the command stops and names
+  the files. The folder of a `local:` part source must be committed, because the part is
+  pinned to `HEAD`.
 - `work_branch` must differ from the main branch (validated in `config.yaml`).
-- `sync` (CLI and scheduled workflow) writes upstream updates into the same work branch:
-  one commit per moved mirror or local plugin with parts. It skips `quarantined` items and
+- `sync` (CLI and scheduled workflow) writes upstream updates into the same work branch
+  for every moved mirror or local plugin with parts; the workflow then runs `finish`. It skips `quarantined` items and
   is idempotent. It also refreshes the cached catalog of every source.
 - `finish [--level item=patch|minor|major] [--no-pr]` runs `build` and the version step,
   commits what is left, pushes the branch and opens or updates the one PR into `main`.
@@ -387,8 +387,7 @@ source add ─► cache (catalog + part index) ─► browse
 
 **Revocation** is a normal change on the work branch. `revoke <item>` removes the item,
 or with `--to TAG` rolls it back to its content at that tag and sets `quarantined: true`.
-It reports the clients in `clients.yaml` whose ref still holds the revoked content. To
-get it out fast, finish and merge the PR on its own.
+To get it out fast, finish and merge the PR on its own.
 
 **Quarantine.** `quarantined: true` in `items.yaml` only makes `sync` skip the item. The
 item stays at its pinned commit until the flag is cleared.
@@ -423,7 +422,7 @@ validate workflow, and on the Changes page.
 `plugin new <name>`, `local add <dir>`, `lock refresh`, `build [--check]`, `validate`,
 `flags [--base]`, `version <item> --patch|--minor|--major|--set X.Y.Z`, `sync [--item]`,
 `status`, `finish [--level item=level] [--no-pr]`, `release`, `revoke <item> [--to TAG]`,
-`clients add|list|remove`, `marketplace add|update` (consumer side, replaces
+`marketplace add|update` (consumer side, replaces
 `add-skills.sh`; decided by the user, was `vendor`), `serve`
 (needs `skill-dojo[web]`).
 
@@ -443,7 +442,7 @@ skills, agents, MCP servers and hooks with an "Add to plugin" dialog) · Plugins
 item with kind, version and parts; "New plugin" with the folder path to put files in and
 a "Scan for new files" button, which runs `build`) · Marketplace preview (the exact
 catalogs and tree that would be committed) · Releases (commits on `origin/main` since the
-last tag, notes preview, "Create release", past releases) · Clients · Audit (timeline
+last tag, notes preview, "Create release", past releases) · Revoke (remove an item or roll it back on the work branch) · Audit (timeline
 built from git).
 
 ## Reuse from the jenreh repo (port into skill-dojo, then delete here)
@@ -476,7 +475,7 @@ built from git).
    plugin and add its parts. A hand edit inside a mirrored folder is caught by `validate`
    as drift against `lock.json`.
 3. **Parts copy exact pinned files** of each picked skill, agent, MCP server or hook into
-   a local plugin. Any part's upstream change becomes a `sync` commit on the work branch,
+   a local plugin. Any part's upstream change is written into the work branch by `sync`,
    and the plugin gets a patch bump. A hand edit inside a local plugin, parts included, is
    taken into the lock by `build`; the risk flags against `main` show it in the PR.
 4. **Approval = merging the one PR into `main`.** Git is the single source of truth, and
@@ -534,7 +533,7 @@ how risk flags are detected, the Reflex page design within appkit-mantine, test 
   marketplace, one Claude marketplace); the catalogs are cached. `browse` lists them from
   the cache. `mirror` one plugin, `add-parts --create` two skills from different sources
   into a new local plugin, and `plugin new` a third plugin and drop a skill into it by
-  hand, then `build`. Every command is one commit on `skill-dojo/changes`.
+  hand, then `build`. Every command changes files on `skill-dojo/changes`; none commits.
 - `finish` pushes the branch and opens one PR into `main` with risk flags. Every changed
   local plugin has a higher version than on `main`; the mirror keeps its upstream
   version; the PR body lists them.

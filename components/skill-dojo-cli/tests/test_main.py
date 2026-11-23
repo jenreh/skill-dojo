@@ -8,7 +8,7 @@ from skill_dojo_cli.main import app
 
 runner = CliRunner()
 
-GROUPS = ["source", "plugin", "local", "lock", "clients", "marketplace"]
+GROUPS = ["source", "plugin", "local", "lock", "marketplace"]
 COMMANDS = [
     "init",
     "browse",
@@ -26,7 +26,7 @@ COMMANDS = [
     "flags",
     "serve",
 ]
-REMOVED = ["review", "promote", "bundle", "vendor"]
+REMOVED = ["review", "promote", "bundle", "vendor", "clients"]
 
 
 def test_version() -> None:
@@ -50,7 +50,7 @@ def test_every_command_has_help(name: str) -> None:
 
 
 def test_verbose_enables_debug_logging() -> None:
-    runner.invoke(app, ["-v", "clients", "list"])
+    runner.invoke(app, ["-v", "validate"])
     assert logging.getLogger().level == logging.DEBUG
 
 

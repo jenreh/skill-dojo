@@ -133,6 +133,7 @@ class FixtureRepos:
         catalog = {
             "name": name,
             "owner": {"name": "Upstream"},
+            "metadata": {"version": "3.1.0"},
             "plugins": [
                 {
                     "name": "tools",
@@ -150,7 +151,7 @@ class FixtureRepos:
                 "plugins/tools/.claude-plugin/plugin.json": json.dumps(manifest),
                 "plugins/tools/skills/lint/SKILL.md": skill_md(
                     "lint", "Lints code. Use when checking style."
-                ),
+                ).replace("---\n\n", "metadata:\n  version: 1.4.0\n---\n\n", 1),
                 "plugins/tools/commands/fmt.md": "Run the formatter.\n",
             },
         )

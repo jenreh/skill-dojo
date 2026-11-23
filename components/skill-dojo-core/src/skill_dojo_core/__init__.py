@@ -5,12 +5,6 @@ Front ends (CLI, web UI, a later server) import only from this module.
 
 from skill_dojo_core.branches import WorkBranch, main_branch, work_branch
 from skill_dojo_core.commands.adopt import AdoptResult, adopt
-from skill_dojo_core.commands.clients import (
-    ClientsResult,
-    clients_add,
-    clients_list,
-    clients_remove,
-)
 from skill_dojo_core.commands.items import (
     LocalAddResult,
     LockRefreshResult,
@@ -89,7 +83,6 @@ from skill_dojo_core.errors import (
 )
 from skill_dojo_core.github import GhCli, GitHub, PullRequest
 from skill_dojo_core.models import (
-    Client,
     RiskTier,
     Source,
     SourceType,
@@ -101,7 +94,7 @@ from skill_dojo_core.repo_lock import repo_lock
 from skill_dojo_core.results import Result
 from skill_dojo_core.risk import RiskFlag
 from skill_dojo_core.risk import severity as flag_severity
-from skill_dojo_core.sources import UpstreamPlugin
+from skill_dojo_core.sources import UpstreamPlugin, web_url
 from skill_dojo_core.validation import Finding, ValidationReport
 from skill_dojo_core.versions import LEVELS
 
@@ -115,8 +108,6 @@ __all__ = [
     "CatalogPreview",
     "ChangeResult",
     "ChangesOverview",
-    "Client",
-    "ClientsResult",
     "CommitInfo",
     "ConflictError",
     "Context",
@@ -173,9 +164,6 @@ __all__ = [
     "browse",
     "build",
     "changes_overview",
-    "clients_add",
-    "clients_list",
-    "clients_remove",
     "finish",
     "flag_severity",
     "flags",
@@ -208,5 +196,6 @@ __all__ = [
     "sync",
     "tool_pin",
     "validate",
+    "web_url",
     "work_branch",
 ]

@@ -18,7 +18,6 @@ from skill_dojo_core.branches import COMMIT_PREFIX, main_branch, work_branch
 from skill_dojo_core.commands.mirror import flags
 from skill_dojo_core.commands.release import (
     TAG_PREFIX,
-    affected,
     fetch_tags,
     previous_tag,
     release_notes,
@@ -28,8 +27,8 @@ from skill_dojo_core.commands.work import WorkStatus, status
 from skill_dojo_core.context import Context
 from skill_dojo_core.diffs import DiffLine, compare_texts
 from skill_dojo_core.errors import SkillDojoError
-from skill_dojo_core.models import Client, ItemKind, LockFile
-from skill_dojo_core.parts import LOCAL_SOURCE, Fetcher, index_parts
+from skill_dojo_core.models import ItemKind, LockFile
+from skill_dojo_core.parts import LOCAL_SOURCE, Fetcher, file_version, index_parts
 from skill_dojo_core.registry import LOCK, REGISTRY_DIR, Registry, model_at
 from skill_dojo_core.results import Result
 from skill_dojo_core.risk import RiskFlag
@@ -77,6 +76,8 @@ class PartInfo(Result):
     path: str = ""
     commit: str | None = None
     license: str | None = None
+    description: str = ""
+    version: str | None = None
 
     @property
     def spec(self) -> str:
@@ -98,6 +99,9 @@ class PluginInfo(Result):
 
 
 class PluginsOverview(Result):
+    marketplace_version: str | None = Field(
+        default=None, description="Newest release tag without its prefix"
+    )
     plugins: list[PluginInfo] = []
     local: list[str] = Field(default_factory=list, description="Local plugin ids")
 
@@ -115,6 +119,28 @@ def _manifest(root: Path) -> dict[str, object]:
         if isinstance(data, dict):
             return data
     return {}
+
+
+# Where a part's frontmatter lives inside the plugin; others carry no version.
+_PART_FILES = {"skill": "skills/{}/SKILL.md", "agent": "agents/{}.md"}
+
+
+def _part_version(root: Path, kind: str, name: str) -> str | None:
+    pattern = _PART_FILES.get(kind)
+    return file_version(root / pattern.format(name)) if pattern else None
+
+
+def _marketplace_version(repo: Path) -> str | None:
+    """The newest local release tag, as the version of this marketplace."""
+    newest = git.run(
+        repo,
+        "for-each-ref",
+        "--sort=-creatordate",
+        "--count=1",
+        "--format=%(refname:short)",
+        f"refs/tags/{TAG_PREFIX}*",
+    )
+    return newest.removeprefix(TAG_PREFIX) or None
 
 
 def plugins_overview(ctx: Context) -> PluginsOverview:
@@ -135,6 +161,7 @@ def plugins_overview(ctx: Context) -> PluginsOverview:
                 path=pinned.path if (pinned := locked.get((p.kind, p.name))) else "",
                 commit=p.commit,
                 license=pinned.upstream.license if pinned else None,
+                version=_part_version(root, p.kind, p.name),
             )
             for p in item.parts
         ]
@@ -153,7 +180,9 @@ def plugins_overview(ctx: Context) -> PluginsOverview:
             )
         )
     local = [i.id for i in found if i.kind == ItemKind.LOCAL.value]
-    return PluginsOverview(plugins=found, local=local)
+    return PluginsOverview(
+        marketplace_version=_marketplace_version(ctx.repo), plugins=found, local=local
+    )
 
 
 def plugin_parts(ctx: Context, source_id: str, plugin: str) -> PluginParts:
@@ -177,13 +206,17 @@ def plugin_parts(ctx: Context, source_id: str, plugin: str) -> PluginParts:
                         license=hit.plugin.license,
                         source=source_id,
                         plugin=plugin,
+                        description=p.description,
+                        version=p.version,
                     )
                     for p in hit.parts
                 ]
             )
     with tempfile.TemporaryDirectory(prefix="skill-dojo-parts-") as tmp:
         sources = {s.id: s for s in reg.sources.sources}
-        files, upstream = Fetcher(ctx, sources, Path(tmp)).plugin(source_id, plugin)
+        files, upstream = Fetcher(ctx, sources, Path(tmp), pinning=False).plugin(
+            source_id, plugin
+        )
         refs = index_parts(files)
     return PluginParts(
         parts=[
@@ -194,6 +227,8 @@ def plugin_parts(ctx: Context, source_id: str, plugin: str) -> PluginParts:
                 license=upstream.license,
                 source=source_id,
                 plugin=plugin,
+                description=p.description,
+                version=p.version,
             )
             for p in refs
         ]
@@ -208,7 +243,6 @@ class TagInfo(Result):
     commit: str
     date: str = ""
     items: int = 0
-    clients: int = 0
 
 
 class CommitInfo(Result):
@@ -229,8 +263,8 @@ class ReleaseOverview(Result):
     notes: str = ""
 
 
-def tags(repo: Path, clients: list[Client]) -> list[TagInfo]:
-    """Release tags, newest first, with item and client counts."""
+def tags(repo: Path) -> list[TagInfo]:
+    """Release tags, newest first, with item counts."""
     out = git.run(
         repo,
         "for-each-ref",
@@ -249,7 +283,6 @@ def tags(repo: Path, clients: list[Client]) -> list[TagInfo]:
                 commit=commit,
                 date=date,
                 items=len(model_at(repo, commit, LOCK, LockFile).items),
-                clients=sum(1 for c in clients if c.ref == name),
             )
         )
     return found
@@ -283,7 +316,7 @@ def release_overview(ctx: Context) -> ReleaseOverview:
     fetch_tags(ctx.repo)
     head = git.run(ctx.repo, "rev-parse", f"{m_ref}^{{commit}}")
     previous = previous_tag(ctx.repo, head)
-    found = tags(ctx.repo, reg.clients.clients)
+    found = tags(ctx.repo)
     latest = found[0] if found else None
     return ReleaseOverview(
         main=main,
@@ -463,7 +496,7 @@ def audit_log(ctx: Context) -> AuditResult:
             ctx.repo, "log", "--format=%H%x09%an%x09%aI%x09%s", "-n", "500", base
         )
         events += [e for line in out.splitlines() if (e := _commit_event(line))]
-    for tag in tags(ctx.repo, reg.clients.clients):
+    for tag in tags(ctx.repo):
         tagger = git.run(
             ctx.repo, "for-each-ref", "--format=%(taggername)", f"refs/tags/{tag.tag}"
         )
@@ -488,8 +521,6 @@ class RevokeTarget(Result):
     item: str
     version: str | None = None
     rollback_to: str | None = None
-    affected: list[Client] = []
-    unknown: list[Client] = []
 
 
 class RevokePreview(Result):
@@ -508,8 +539,7 @@ def _rollback_tag(repo: Path, item_id: str, current: str | None) -> str | None:
 
 
 def revoke_preview(ctx: Context) -> RevokePreview:
-    """Every item on main with the clients a revoke would warn and the release a
-    rollback could restore."""
+    """Every item on main with the release a rollback could restore."""
     reg = Registry.load(ctx.repo)
     try:
         m_ref = git.fetch_branch(ctx.repo, main_branch(reg))
@@ -518,18 +548,15 @@ def revoke_preview(ctx: Context) -> RevokePreview:
         log.warning("Could not fetch origin: %s", exc)
         return RevokePreview()
     lock = model_at(ctx.repo, m_ref, LOCK, LockFile)
-    found = []
-    for item_id in sorted(lock.items):
-        hit, unknown = affected(ctx.repo, reg.clients.clients, item_id, None)
-        found.append(
+    return RevokePreview(
+        targets=[
             RevokeTarget(
                 item=item_id,
                 version=builder.manifest_version_at(ctx.repo, m_ref, item_id),
                 rollback_to=_rollback_tag(
                     ctx.repo, item_id, lock.items[item_id].tree_sha256
                 ),
-                affected=hit,
-                unknown=unknown,
             )
-        )
-    return RevokePreview(targets=found)
+            for item_id in sorted(lock.items)
+        ]
+    )

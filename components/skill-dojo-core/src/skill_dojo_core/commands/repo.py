@@ -8,7 +8,6 @@ from skill_dojo_core.context import Context
 from skill_dojo_core.errors import ConflictError
 from skill_dojo_core.models import (
     ChannelPolicy,
-    ClientsFile,
     ItemsFile,
     LockFile,
     Namespace,
@@ -56,7 +55,6 @@ def scaffold(repo: Path, config: RegistryConfig) -> list[str]:
         registry.SOURCES: SourcesFile(),
         registry.ITEMS: ItemsFile(),
         registry.POLICY: ChannelPolicy(),
-        registry.CLIENTS: ClientsFile(),
     }
     for file_name, model in files.items():
         registry.save_yaml_model(

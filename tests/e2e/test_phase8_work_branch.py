@@ -1,8 +1,9 @@
 """Phase 8 end to end: the whole flow on one work branch, plus the migration.
 
 add source (cached) -> browse -> mirror whole plugin -> parts into a new
-plugin -> plugin new + hand-added skill + build -> finish (one PR, versions)
--> merge -> a fresh work branch -> sync reuses the open work branch -> release.
+plugin -> plugin new + hand-added skill + build -> finish (one commit, one PR,
+versions) -> merge -> a fresh work branch -> sync -> release. Only ``finish``
+commits; every other command just changes files.
 """
 
 import json
@@ -29,8 +30,7 @@ from skill_dojo_core import (
     sync,
     validate,
 )
-from skill_dojo_core.models import ItemKind, ItemsFile, LockFile
-from skill_dojo_core.registry import ITEMS, LOCK, model_at
+from skill_dojo_core.branches import snapshot
 from tests.support.fake_github import FakeGitHub
 from tests.support.fixture_repos import FixtureRepo, FixtureRepos, git, skill_md
 
@@ -67,10 +67,13 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
     ap, cl = upstreams
     # Adding the sources moved the checkout onto the work branch.
     assert branch(admin) == WORK
-    assert subjects(admin) == ["skill-dojo: source add ap", "skill-dojo: source add cl"]
+    assert subjects(admin) == []
     cache = admin.repo / ".skill-dojo"
     assert (cache / ".gitignore").read_text() == "*\n"
-    assert git(admin.repo, "status", "--porcelain") == ""
+    assert git(admin.repo, "status", "--porcelain").split() == [
+        "M",
+        "registry/sources.yaml",
+    ]
 
     offered = browse(admin, "ap")
     assert offered.cached
@@ -79,7 +82,6 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
 
     mirrored = mirror(admin, "ap", "hello")
     assert (mirrored.status, mirrored.pin) == ("added", ap.head)
-    assert mirrored.commit == git(admin.repo, "rev-parse", "HEAD")
 
     kit = add_parts(
         admin,
@@ -99,11 +101,7 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
     )
     build(admin)
     assert validate(admin).ok, validate(admin).errors
-    assert [s.removeprefix("skill-dojo: ") for s in subjects(admin)][2:] == [
-        f"mirror hello {ap.head[:12]}",
-        "add-parts kit skill/greet, skill/lint",
-        "plugin new own",
-    ]
+    assert subjects(admin) == []
 
     done = finish(admin)
     assert done.status == "opened"
@@ -117,7 +115,7 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
     assert versions["kit"].branch_version == "0.1.0"
     assert "| `hello` | mirror | added |" in pr.body
     assert "## Risk flags" in pr.body
-    assert subjects(admin)[-1] == "skill-dojo: finish"
+    assert subjects(admin) == ["skill-dojo: finish"]
     assert git(admin.repo, "rev-parse", f"origin/{WORK}") == git(
         admin.repo, "rev-parse", "HEAD"
     )
@@ -135,9 +133,9 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
     # The old branch is merged: the next change starts again from main.
     plugin_new(admin, "other")
     assert branch(admin) == WORK
-    assert subjects(admin) == ["skill-dojo: plugin new other"]
+    assert subjects(admin) == []
 
-    # Upstream moves; sync commits onto the same branch and finish updates a PR.
+    # Upstream moves; sync writes it into the work branch and finish opens a PR.
     ap.commit(
         {
             "plugins/hello/skills/greet/SKILL.md": skill_md(
@@ -151,7 +149,7 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
         ("kit", "updated"),
     ]
     assert synced.refreshed == ["ap", "cl"]
-    assert subjects(admin)[-2:] == ["skill-dojo: sync hello", "skill-dojo: sync kit"]
+    assert subjects(admin) == []
     assert [c.status for c in sync(admin).changes] == ["up-to-date", "up-to-date"]
     second = finish(admin)
     assert second.status == "opened"
@@ -164,7 +162,7 @@ def test_the_whole_flow_on_one_work_branch(  # noqa: PLR0915 (one scenario)
     state = status(admin)
     assert state.on_branch
     assert state.pull_request is not None
-    assert state.ahead >= 3
+    assert state.ahead == 1
 
     # A chosen level wins over the automatic patch bump.
     set_version(admin, "kit", level="minor")
@@ -184,14 +182,18 @@ def test_unpushed_work_branch_is_kept(
     admin: Context, upstreams: tuple[FixtureRepo, ...]
 ) -> None:
     del upstreams
+    git(admin.repo, "add", "-A")
+    git(admin.repo, "commit", "-q", "-m", "my sources")  # the admin commits
     head = git(admin.repo, "rev-parse", "HEAD")
     git(admin.repo, "checkout", "-q", "main")
     plugin_new(admin, "x")
-    assert git(admin.repo, "rev-parse", "HEAD~1") == head
+    assert branch(admin) == WORK
+    assert git(admin.repo, "rev-parse", "HEAD") == head
 
 
 def test_old_repo_with_bundles_and_approvals_migrates(admin: Context) -> None:
     plugin_new(admin, "kit")
+    written = snapshot(admin.repo)
     items = admin.repo / "registry/items.yaml"
     items.write_text(
         items.read_text().replace("kind: local", "kind: bundle")
@@ -215,11 +217,7 @@ def test_old_repo_with_bundles_and_approvals_migrates(admin: Context) -> None:
     assert build(admin).changed == []
     assert validate(admin).ok
     # The migrated files are exactly what the tool writes today.
-    assert git(admin.repo, "status", "--porcelain") == ""
-    assert model_at(admin.repo, "HEAD", ITEMS, ItemsFile).get("kit") is not None
-    assert model_at(admin.repo, "HEAD", LOCK, LockFile).items["kit"].kind is (
-        ItemKind.LOCAL
-    )
+    assert snapshot(admin.repo) == written
 
 
 def test_cache_is_reused_and_refreshed(
@@ -325,12 +323,57 @@ def test_finish_merges_what_sync_pushed(
     assert len([p for p in fake_github.pulls if p.state == "OPEN"]) == 1
 
 
-def test_dirty_tree_off_the_work_branch_stops(
+def test_commands_change_files_but_never_commit(
+    admin: Context, upstreams: tuple[FixtureRepo, ...]
+) -> None:
+    ap, _ = upstreams
+    head = git(admin.repo, "rev-parse", "HEAD")
+    mirror(admin, "ap", "hello")
+    plugin_new(admin, "own")
+    ap.commit({"plugins/hello/NOTES.md": "new\n"})
+    [moved] = sync(admin, item="hello").changes  # an uncommitted mirror moves on
+    assert moved.status == "updated"
+    assert git(admin.repo, "rev-parse", "HEAD") == head
+    dirty = git(admin.repo, "status", "--porcelain", "--untracked-files=all")
+    assert "plugins/hello/NOTES.md" in dirty
+    assert "plugins/own/" in dirty
+
+
+def test_edits_off_the_work_branch_come_along(
     admin: Context, upstreams: tuple[FixtureRepo, ...]
 ) -> None:
     del upstreams
     git(admin.repo, "checkout", "-q", "main")
     (admin.repo / "notes.txt").write_text("draft\n")
+    plugin_new(admin, "x")
+    assert branch(admin) == WORK
+    assert (admin.repo / "notes.txt").read_text() == "draft\n"
+    assert (admin.repo / "plugins/x/.claude-plugin/plugin.json").is_file()
+    assert subjects(admin) == []
+
+
+def test_edits_that_clash_with_the_work_branch_stop(
+    admin: Context, upstreams: tuple[FixtureRepo, ...]
+) -> None:
+    del upstreams
+    git(admin.repo, "checkout", "-q", "main")
+    (admin.repo / "notes.txt").write_text("main only\n")
+    git(admin.repo, "add", "notes.txt")
+    git(admin.repo, "commit", "-q", "-m", "local note")
+    (admin.repo / "notes.txt").write_text("draft\n")
     with pytest.raises(ConflictError, match=r"notes\.txt"):
         plugin_new(admin, "x")
     assert branch(admin) == "main"
+    assert (admin.repo / "notes.txt").read_text() == "draft\n"
+
+
+def test_hand_edits_in_a_mirror_stop_sync(
+    admin: Context, upstreams: tuple[FixtureRepo, ...]
+) -> None:
+    ap, _ = upstreams
+    mirror(admin, "ap", "hello")
+    (admin.repo / "plugins/hello/skills/greet/SKILL.md").write_text("mine\n")
+    ap.commit({"plugins/hello/NOTES.md": "new\n"})
+    with pytest.raises(ConflictError, match=r"greet/SKILL\.md"):
+        sync(admin, item="hello")
+    assert (admin.repo / "plugins/hello/skills/greet/SKILL.md").read_text() == "mine\n"

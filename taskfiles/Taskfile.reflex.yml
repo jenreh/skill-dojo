@@ -12,10 +12,16 @@ tasks:
   # Reflex Application Commands
   # ----------------------------------------------------------------------------
 
+  # Extra serve options go after "--", e.g.
+  #   task run -- --repo ~/Workspace/templates/agent-skills
   run:
-    desc: Start the reflex web application
-    cmd: "{{.RUNNER}} skill-dojo serve"
+    desc: Start the web UI with hot reload (task run -- --repo <dir>)
+    cmd: "{{.RUNNER}} skill-dojo serve --reload {{.CLI_ARGS}}"
 
   run:debug:
-    desc: Start the reflex web application with debug logging
-    cmd: "{{.RUNNER}} skill-dojo -v serve"
+    desc: Start the web UI with hot reload and debug logging
+    cmd: "{{.RUNNER}} skill-dojo -v serve --reload {{.CLI_ARGS}}"
+
+  run:prod:
+    desc: Start the web UI as a prod build (no reload)
+    cmd: "{{.RUNNER}} skill-dojo serve {{.CLI_ARGS}}"

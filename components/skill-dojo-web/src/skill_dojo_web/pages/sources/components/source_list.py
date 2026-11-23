@@ -3,19 +3,36 @@
 import appkit_mantine as mn
 import reflex as rx
 
-from skill_dojo_web.components.common import badge, mono, section_title
+from skill_dojo_web.components.common import (
+    WINDOW_HEIGHT,
+    WINDOW_TOP,
+    badge,
+    mono,
+    section_title,
+    work,
+    working,
+)
 from skill_dojo_web.pages.sources.state import DETECT, TYPE_LABEL
 from skill_dojo_web.pages.sources.state import SourcesState as S
 
 
 def _source_row(source: rx.Var) -> rx.Component:
+    key = f"source:{source['id']}"
     return mn.unstyled_button(
-        mn.stack(
-            mn.text(source["id"], fw=600, size="sm"),
-            mn.group(badge(source["type"]), mono(source["where"], c="dimmed"), gap=6),
-            gap=4,
+        mn.group(
+            mn.stack(
+                mn.text(source["id"], fw=600, size="sm"),
+                mn.group(
+                    badge(source["type"]), mono(source["where"], c="dimmed"), gap=6
+                ),
+                gap=4,
+                miw=0,
+            ),
+            rx.cond(working(key), mn.loader(size="xs")),
+            justify="space-between",
+            wrap="nowrap",
         ),
-        on_click=S.select(source["id"].to(str)),
+        on_click=work(key, S.select(source["id"].to(str))),
         p="sm",
         w="100%",
         bg=rx.cond(
@@ -49,7 +66,11 @@ def add_form() -> rx.Component:
                 on_change=S.set_new_type,
                 allow_deselect=False,
             ),
-            mn.button("Add source", on_click=S.add_source),
+            mn.button(
+                "Add source",
+                loading=working("add_source"),
+                on_click=work("add_source", S.add_source),
+            ),
             gap="xs",
         ),
         with_border=True,
@@ -58,28 +79,40 @@ def add_form() -> rx.Component:
 
 
 def source_list() -> rx.Component:
+    """Header and add form stay put; the rows scroll within the window height."""
     return mn.stack(
         mn.group(
             section_title("Sources", "registry/sources.yaml"),
             mn.button(
                 "Add",
-                left_section=rx.icon("plus", size=13),
+                left_section=rx.icon("plus", size=14),
                 variant="default",
-                size="xs",
                 on_click=S.toggle_add,
             ),
             justify="space-between",
         ),
         rx.cond(S.adding, add_form()),
-        rx.foreach(S.sources, _source_row),
-        mn.paper(
-            mn.text(
-                "Sync runs on a schedule in GitHub Actions.", size="xs", c="dimmed"
+        mn.scroll_area(
+            mn.stack(
+                rx.foreach(S.sources, _source_row),
+                mn.paper(
+                    mn.text(
+                        "Sync runs on a schedule in GitHub Actions.",
+                        size="xs",
+                        c="dimmed",
+                    ),
+                    mono(".github/workflows/sync.yml", c="dimmed"),
+                    p="sm",
+                    with_border=True,
+                    style={"borderStyle": "dashed"},
+                ),
+                gap="xs",
             ),
-            mono(".github/workflows/sync.yml", c="dimmed"),
-            p="sm",
-            with_border=True,
-            style={"borderStyle": "dashed"},
+            type="auto",
+            flex="1",
+            mih=0,
         ),
         gap="xs",
+        h=WINDOW_HEIGHT,
+        style={"position": "sticky", "top": WINDOW_TOP},
     )

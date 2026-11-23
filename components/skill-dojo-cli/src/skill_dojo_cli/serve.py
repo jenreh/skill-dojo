@@ -28,7 +28,7 @@ def resolve_serve_repo(repo: Path | None) -> Path:
     return find_repo_root(start)
 
 
-def _rerun_with_web(repo: Path | None, port: int) -> int | None:
+def _rerun_with_web(repo: Path | None, port: int, *, reload: bool) -> int | None:
     """Run ``serve`` in a uv tool env that has the web extra; ``None`` if impossible."""
     uv = shutil.which("uv")
     if uv is None or os.environ.get(REEXEC_ENV):
@@ -40,6 +40,8 @@ def _rerun_with_web(repo: Path | None, port: int) -> int | None:
         uv, "tool", "run", "--from", f"skill-dojo[web]=={version}",
         "skill-dojo", "serve", "--port", str(port), "--repo", str(root),
     ]  # fmt: skip
+    if reload:
+        command.append("--reload")
     env = {**os.environ, REEXEC_ENV: "1"}
     return subprocess.run(command, env=env, check=False).returncode  # noqa: S603
 
@@ -50,16 +52,19 @@ def serve(
         Path | None,
         typer.Option(help="Repo to work in (default: the current directory)."),
     ] = None,
+    reload: Annotated[
+        bool, typer.Option(help="Dev mode: reload on source changes.")
+    ] = False,
 ) -> None:
     """Start the local web UI on 127.0.0.1."""
     try:
         web = importlib.import_module("skill_dojo_web")
     except ModuleNotFoundError:
-        code = _rerun_with_web(repo, port)
+        code = _rerun_with_web(repo, port, reload=reload)
         if code is not None:
             raise typer.Exit(code) from None
         typer.echo(INSTALL_HINT, err=True)
         raise typer.Exit(2) from None
     root = resolve_serve_repo(repo)
     typer.echo(f"skill-dojo UI for {root} on http://127.0.0.1:{port}")
-    raise typer.Exit(web.serve(root, port))
+    raise typer.Exit(web.serve(root, port, reload=reload))

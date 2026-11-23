@@ -6,7 +6,6 @@ from skill_dojo_core import (
     audit_log,
     browse,
     changes_overview,
-    clients_add,
     finish,
     marketplace_preview,
     mirror,
@@ -41,11 +40,19 @@ def test_changes_plugins_and_parts(
     assert plugins["hello"].pin
     assert plugins["kit"].version == "0.1.0"
     assert [p.spec for p in plugins["kit"].parts] == ["cl:tools/skill/lint"]
+    assert plugins["kit"].parts[0].version == "1.4.0"
     assert plugins_overview(admin).local == ["kit"]
     cached = plugin_parts(admin, "cl", "tools")
     assert [(p.kind, p.name) for p in cached.parts] == [("skill", "lint")]
+    assert cached.parts[0].description == "Lints code. Use when checking style."
+    assert cached.parts[0].version == "1.4.0"
+    assert browse(admin, "cl").version == "3.1.0"
+    assert browse(admin, "ap").version is None
+    fetched = plugin_parts(admin, "ap", "hello")
+    assert fetched.parts[0].description == "Greets the user. Use when saying hello."
     local = plugin_parts(admin, "local", "kit")
     assert [(p.kind, p.name) for p in local.parts] == [("skill", "lint")]
+    assert local.parts[0].description == "Lints code. Use when checking style."
 
 
 def test_release_overview_preview_audit_and_revoke(
@@ -65,15 +72,17 @@ def test_release_overview_preview_audit_and_revoke(
     overview = release_overview(admin)
     assert overview.untagged
     assert overview.latest_tag is None
-    assert any("mirror hello" in c.subject for c in overview.commits)
+    assert any(c.subject == "skill-dojo: finish" for c in overview.commits)
     assert "hello" in overview.notes
 
+    assert plugins_overview(admin).marketplace_version is None
     tagged = release(admin)
-    clients_add(admin, "web", tagged.tag, contact="#web")
+    assert plugins_overview(admin).marketplace_version == tagged.tag.removeprefix(
+        "marketplace-v"
+    )
     after = release_overview(admin)
     assert after.latest_tag == tagged.tag
     assert after.tags[0].items == 1
-    assert after.tags[0].clients == 1
     assert not after.untagged
     assert after.commits == []
 
@@ -93,10 +102,8 @@ def test_release_overview_preview_audit_and_revoke(
 
     (target,) = revoke_preview(admin).targets
     assert target.item == "hello"
-    assert [c.name for c in target.affected] == ["web"]
     assert target.rollback_to is None
 
     revoked = revoke(admin, "hello")
     assert revoked.action == "removed"
-    assert [c.name for c in revoked.affected_clients] == ["web"]
     assert not (admin.repo / "plugins/hello").exists()

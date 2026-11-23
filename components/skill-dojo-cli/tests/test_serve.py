@@ -54,16 +54,42 @@ def test_serve_does_not_rerun_twice(
     assert result.exit_code == 2
 
 
+def test_serve_reload_passes_through_to_the_web_ui(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    calls = _fake_web(monkeypatch)
+    result = runner.invoke(app, ["serve", "--reload", "--repo", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert calls == [(tmp_path.resolve(), 8080)]
+    assert sys.modules["skill_dojo_web"].reloads == [True]
+
+
+def test_serve_without_web_extra_forwards_reload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setitem(sys.modules, "skill_dojo_web", None)
+    monkeypatch.delenv("SKILL_DOJO_WEB_REEXEC", raising=False)
+    monkeypatch.setattr("skill_dojo_cli.serve.shutil.which", lambda _: "/bin/uv")
+    seen: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> types.SimpleNamespace:
+        seen.append(command)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("skill_dojo_cli.serve.subprocess.run", fake_run)
+    result = runner.invoke(app, ["serve", "--reload", "--repo", str(tmp_path)])
+    assert result.exit_code == 0
+    assert seen[0][-1] == "--reload"
+
+
 def test_serve_starts_the_web_ui_for_the_repo_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".git").mkdir()
     (tmp_path / "sub").mkdir()
-    calls: list[tuple[Path, int]] = []
-    fake = types.SimpleNamespace(
-        serve=lambda repo, port: calls.append((repo, port)) or 0
-    )
-    monkeypatch.setitem(sys.modules, "skill_dojo_web", fake)
+    calls = _fake_web(monkeypatch)
     monkeypatch.chdir(tmp_path / "sub")
     result = runner.invoke(app, ["serve", "--port", "8123"])
     assert result.exit_code == 0, result.output
@@ -73,9 +99,14 @@ def test_serve_starts_the_web_ui_for_the_repo_root(
 
 def _fake_web(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, int]]:
     calls: list[tuple[Path, int]] = []
-    fake = types.SimpleNamespace(
-        serve=lambda repo, port: calls.append((repo, port)) or 0
-    )
+    reloads: list[bool] = []
+
+    def fake_serve(repo: Path, port: int, *, reload: bool = False) -> int:
+        calls.append((repo, port))
+        reloads.append(reload)
+        return 0
+
+    fake = types.SimpleNamespace(serve=fake_serve, reloads=reloads)
     monkeypatch.setitem(sys.modules, "skill_dojo_web", fake)
     return calls
 

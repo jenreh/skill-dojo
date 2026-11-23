@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from skill_dojo_core import builder, git, hashing, jsontext
+from skill_dojo_core import builder, frontmatter, git, hashing, jsontext
 from skill_dojo_core.branches import check_clean_folder
 from skill_dojo_core.cache import PartRef
 from skill_dojo_core.context import Context
@@ -127,6 +127,42 @@ def plugin_hooks(files: dict[str, Path]) -> tuple[str, dict[str, Any]]:
     return "", {}
 
 
+def _frontmatter(path: Path | None) -> dict[str, Any]:
+    try:
+        doc = frontmatter.split(path.read_text(encoding="utf-8")) if path else None
+        return frontmatter.parse(doc.frontmatter) if doc else {}
+    except OSError, UnicodeDecodeError, ValueError:
+        return {}
+
+
+def _description(data: dict[str, Any]) -> str:
+    """The ``description`` of a skill or agent frontmatter, on one line."""
+    value = data.get("description")
+    return " ".join(value.split()) if isinstance(value, str) else ""
+
+
+def _version(data: dict[str, Any]) -> str | None:
+    """``version``, else ``metadata.version``, of a skill or agent frontmatter."""
+    meta = data.get("metadata")
+    nested = meta.get("version") if isinstance(meta, dict) else None
+    for value in (data.get("version"), nested):
+        if isinstance(value, str | int | float) and not isinstance(value, bool):
+            return str(value)
+    return None
+
+
+def file_version(path: Path | None) -> str | None:
+    """The version a skill's ``SKILL.md`` or an agent file declares."""
+    return _version(_frontmatter(path))
+
+
+def _ref(kind: str, name: str, path: Path | None) -> PartRef:
+    data = _frontmatter(path)
+    return PartRef(
+        kind=kind, name=name, description=_description(data), version=_version(data)
+    )
+
+
 def index_parts(files: dict[str, Path]) -> list[PartRef]:
     """Every part a plugin offers, for the cache and the Sources page."""
     skills = sorted(
@@ -147,8 +183,8 @@ def index_parts(files: dict[str, Path]) -> list[PartRef]:
     except InvalidInputError:
         servers, events = [], []
     return [
-        *(PartRef(kind="skill", name=n) for n in skills),
-        *(PartRef(kind="agent", name=n) for n in agents),
+        *(_ref("skill", n, files.get(f"skills/{n}/SKILL.md")) for n in skills),
+        *(_ref("agent", n, files.get(f"agents/{n}.md")) for n in agents),
         *(PartRef(kind="mcp_server", name=n) for n in servers),
         *(PartRef(kind="hook", name=n) for n in events),
     ]
@@ -400,11 +436,16 @@ class PluginTree:
 
 @dataclass
 class Fetcher:
-    """Fetches each (source, plugin) once per command."""
+    """Fetches each (source, plugin) once per command.
+
+    ``pinning`` False only lists parts: a local plugin may then hold uncommitted
+    edits, since nothing is pinned to HEAD.
+    """
 
     ctx: Context
     sources: dict[str, Source]
     tmp: Path
+    pinning: bool = True
     cache: dict[tuple[str, str], tuple[dict[str, Path], Upstream]] = field(
         default_factory=dict
     )
@@ -443,7 +484,8 @@ class Fetcher:
             raise NotFoundError(f"'{plugin}' is not a local plugin")
         root = repo / builder.plugin_dir(plugin)
         # The part is pinned to HEAD, so its files must be the ones at HEAD.
-        check_clean_folder(repo, builder.plugin_dir(plugin))
+        if self.pinning:
+            check_clean_folder(repo, builder.plugin_dir(plugin))
         lock = reg.lock.items.get(plugin)
         skip = set(lock.generated) if lock else set()
         files = {r: root / r for r in hashing.list_files(root) if r not in skip}
