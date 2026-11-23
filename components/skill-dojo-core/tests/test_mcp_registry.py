@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from skill_dojo_core import mcp_registry as reg
-from skill_dojo_core.errors import ExternalToolError, InvalidInputError
+from skill_dojo_core.errors import ExternalToolError, InvalidInputError, NotFoundError
 
 
 def package(**data: object) -> reg.Package:
@@ -67,7 +69,9 @@ def test_non_stdio_and_first_usable_package() -> None:
         version="1",
         packages=[remote, package(registryType="pypi", identifier="b", version="1.0")],
     )
-    assert reg.choose_package(entry).registry_type == "pypi"
+    chosen = reg.choose(entry)
+    assert isinstance(chosen, reg.Package)
+    assert chosen.registry_type == "pypi"
     assert reg.unsupported(entry) is None
     only_remote = reg.ServerEntry(name="a/b", version="1", packages=[remote])
     assert "not stdio" in str(reg.unsupported(only_remote))
@@ -122,3 +126,75 @@ def test_bad_responses() -> None:
         reg._entry({"server": {"name": "a/b"}})
     with pytest.raises(InvalidInputError, match="server name"):
         reg.get_server("https://r.example", "../etc")
+
+
+def test_is_repository() -> None:
+    assert reg.is_repository("https://github.com/acme/mcp")
+    assert reg.is_repository("https://git.example/acme/mcp.git")
+    assert reg.is_repository("file:///tmp/mcp.git")
+    assert reg.is_repository("git@github.com:acme/mcp.git")
+    assert not reg.is_repository("https://registry.modelcontextprotocol.io")
+
+
+def remote(**data: object) -> reg.Remote:
+    return reg.Remote.model_validate({"type": "streamable-http", **data})
+
+
+@pytest.mark.parametrize(
+    ("data", "reason"),
+    [
+        ({"type": "websocket", "url": "https://x"}, "not supported"),
+        ({"url": "http://x.example"}, "https"),
+        ({"url": "https://u:p@x.example"}, "credentials"),
+        ({"url": "https://{tenant}.example"}, "variables"),
+    ],
+)
+def test_unusable_remotes(data: dict[str, object], reason: str) -> None:
+    entry = reg.ServerEntry(name="a/b", version="1", remotes=[remote(**data)])
+    assert reason in str(reg.unsupported(entry, remotes=True))
+
+
+def test_remotes_only_count_for_a_pinned_server_json() -> None:
+    entry = reg.ServerEntry(name="a/b", version="1", remotes=[remote(url="https://x")])
+    assert "remote-only" in str(reg.unsupported(entry))
+    assert reg.choose(entry, remotes=True) == entry.remotes[0]
+    empty = reg.ServerEntry(name="a/b", version="1")
+    assert "no package and no remote" in str(reg.unsupported(empty, remotes=True))
+
+
+def test_remote_config_headers() -> None:
+    config = reg.remote_config(
+        remote(
+            type="sse",
+            url="https://x.example/sse",
+            headers=[
+                {"name": "Authorization", "value": "Bearer ${TOKEN}"},
+                {"name": "X-Org", "value": "{org_id}"},
+                {"name": "X-Key", "isRequired": True},
+                {"name": "X-Optional"},
+                {"name": "bad header", "value": "x"},
+            ],
+        )
+    )
+    assert config == {
+        "type": "sse",
+        "url": "https://x.example/sse",
+        "headers": {
+            "Authorization": "Bearer ${TOKEN}",
+            "X-Org": "${ORG_ID}",
+            "X-Key": "${X_KEY}",
+        },
+    }
+
+
+def test_read_server_file(tmp_path: Path) -> None:
+    with pytest.raises(NotFoundError, match=r"server\.json"):
+        reg.read_server_file(tmp_path)
+    (tmp_path / "server.json").write_text("{", encoding="utf-8")
+    with pytest.raises(InvalidInputError, match="unreadable"):
+        reg.read_server_file(tmp_path)
+    (tmp_path / "server.json").write_text(
+        '{"name": "bad name", "version": "1"}', encoding="utf-8"
+    )
+    with pytest.raises(InvalidInputError, match="not an MCP server name"):
+        reg.read_server_file(tmp_path)

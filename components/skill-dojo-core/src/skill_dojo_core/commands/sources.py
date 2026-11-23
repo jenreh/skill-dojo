@@ -1,4 +1,4 @@
-"""``source add|list|remove|allow|refresh`` and ``browse`` (from the local cache)."""
+"""``source add|list|remove|set-type|allow|refresh`` and ``browse`` (cached)."""
 
 import logging
 from pathlib import PurePosixPath
@@ -18,7 +18,12 @@ from skill_dojo_core.parts import LOCAL_SOURCE, index_parts
 from skill_dojo_core.registry import SOURCES, Registry, save_yaml_model
 from skill_dojo_core.results import Result
 from skill_dojo_core.sources import UpstreamPlugin
-from skill_dojo_core.vendoring import Fetched, checkout_source, upstream_files
+from skill_dojo_core.vendoring import (
+    Fetched,
+    checkout_source,
+    server_entry,
+    upstream_files,
+)
 
 log = logging.getLogger(__name__)
 
@@ -72,10 +77,16 @@ def get_source(reg: Registry, source_id: str) -> Source:
 # --- the cached catalog ---------------------------------------------------------
 
 
-def _server_index(source: Source) -> SourceIndex:
+def _server_index(ctx: Context, source: Source) -> SourceIndex:
+    in_repo = mcp_registry.is_repository(source.repository)
+    if in_repo:
+        entries, commit = server_entry(ctx, source)
+    else:
+        entries = mcp_registry.list_servers(source.repository)
+        commit = cache.LATEST
     plugins = [
         CachedPlugin(
-            plugin=mcp_registry.offered(entry, source.repository),
+            plugin=mcp_registry.offered(entry, source.repository, remotes=in_repo),
             parts=[
                 PartRef(
                     kind="mcp_server",
@@ -85,11 +96,11 @@ def _server_index(source: Source) -> SourceIndex:
                 )
             ],
         )
-        for entry in mcp_registry.list_servers(source.repository)
+        for entry in entries
     ]
     return SourceIndex(
         source=source.id,
-        commit=cache.LATEST,
+        commit=commit,
         settings=cache.settings_key(source),
         plugins=plugins,
     )
@@ -99,7 +110,7 @@ def index_source(ctx: Context, source: Source) -> SourceIndex:
     """Fetch the source at its ref and cache what it offers (all plugins,
     whatever the allowlist says, with their parts)."""
     if source.type is SourceType.MCP_REGISTRY:
-        index = _server_index(source)
+        index = _server_index(ctx, source)
         cache.write_index(ctx.repo, index)
         return index
     root, commit = checkout_source(ctx, source)
@@ -159,7 +170,8 @@ def browse(
     """
     reg = Registry.load(ctx.repo)
     source = get_source(reg, source_id)
-    if source.type is SourceType.MCP_REGISTRY and search:
+    live = not mcp_registry.is_repository(source.repository)
+    if source.type is SourceType.MCP_REGISTRY and search and live:
         offered = [
             mcp_registry.offered(entry, source.repository)
             for entry in mcp_registry.list_servers(source.repository, search)
@@ -238,10 +250,14 @@ def source_add(  # noqa: PLR0913
 
     ``owner/name`` is stored as its GitHub URL. Without ``kind`` the type is
     read from the upstream: an Agent Plugins catalog, a Claude Code catalog or
-    a plain git repo. An MCP Registry source takes the registry's base URL.
+    a plain git repo. An MCP Registry source takes the registry's base URL, or a
+    git repo with a ``server.json`` at its root.
     """
     if kind is SourceType.MCP_REGISTRY:
-        repository = mcp_registry.check_url(repository)
+        if mcp_registry.is_repository(repository):
+            repository = sources.normalize_repository(repository)
+        else:
+            repository = mcp_registry.check_url(repository)
         if marketplace_path is not None:
             raise InvalidInputError("an MCP Registry source has no catalog path")
     else:
@@ -270,7 +286,7 @@ def source_add(  # noqa: PLR0913
             ref=ref,
             allowlist=allowlist or [],
         )
-        if kind is not SourceType.MCP_REGISTRY:
+        if _cached(source):
             index_source(ctx, source)
         reg.sources.sources.append(source)
         _save(reg)
@@ -297,6 +313,41 @@ def source_remove(ctx: Context, source_id: str) -> SourcesResult:
         reg.sources.sources.remove(source)
         _save(reg)
     cache.drop_source(ctx.repo, source_id)
+    return SourcesResult(sources=reg.sources.sources)
+
+
+def _cached(source: Source) -> bool:
+    """Whether its catalog is cached (all but a live MCP Registry API)."""
+    return source.type is not SourceType.MCP_REGISTRY or mcp_registry.is_repository(
+        source.repository
+    )
+
+
+def source_set_type(
+    ctx: Context, source_id: str, kind: SourceType | None
+) -> SourcesResult:
+    """Change a source's type (``None``: detect it from the upstream again) and
+    cache its catalog anew. The source stays as it was if that fetch fails."""
+    with editing(ctx):
+        reg = Registry.load(ctx.repo)
+        source = get_source(reg, source_id)
+        if kind is None:
+            kind = _detect(ctx, source_id, source.repository, source.ref, None)
+        keep_path = kind in sources.DEFAULT_PATHS
+        changed = source.model_copy(
+            update={
+                "type": kind,
+                "marketplace_path": source.marketplace_path if keep_path else None,
+            }
+        )
+        if _cached(changed):
+            index_source(ctx, changed)
+        else:
+            mcp_registry.check_url(changed.repository)
+            cache.drop_source(ctx.repo, source_id)
+        reg.sources.sources[reg.sources.sources.index(source)] = changed
+        _save(reg)
+    ctx.report(f"Source '{source_id}' is now {kind.value}")
     return SourcesResult(sources=reg.sources.sources)
 
 

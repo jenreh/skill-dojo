@@ -4,9 +4,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import reflex as rx
+from reflex.event import EventSpec
 
 import skill_dojo_core as core
-from skill_dojo_web.state import AppState
+from skill_dojo_web.state import AppState, off_loop
 
 KINDS = [
     ("all", "All"),
@@ -46,18 +47,20 @@ class AuditState(AppState):
         return [{"day": day, "events": events} for day, events in groups.items()]
 
     @rx.event
-    def load(self) -> None:
+    @off_loop
+    def load(self) -> list[EventSpec]:
         self.load_shell()
         try:
             result = core.audit_log(self._ctx())
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-            return
+            return self._flush()
         self.csv = result.csv()
         self.events = [
             {**e.model_dump(), "time": e.at[11:16] if len(e.at) >= 16 else ""}  # noqa: PLR2004
             for e in result.events
         ]
+        return self._flush()
 
     @rx.event
     def set_kind(self, value: str) -> None:

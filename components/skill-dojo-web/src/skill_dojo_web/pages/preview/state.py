@@ -3,9 +3,10 @@
 from typing import Any
 
 import reflex as rx
+from reflex.event import EventSpec
 
 import skill_dojo_core as core
-from skill_dojo_web.state import AppState
+from skill_dojo_web.state import AppState, off_loop
 
 
 class PreviewState(AppState):
@@ -47,12 +48,14 @@ class PreviewState(AppState):
         return self.current.get("full" if self.full else "changes", [])
 
     @rx.event
-    def load(self) -> None:
+    @off_loop
+    def load(self) -> list[EventSpec]:
         self.load_shell()
         try:
             self.preview = core.marketplace_preview(self._ctx()).model_dump(mode="json")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
+        return self._flush()
 
     @rx.event
     def show_catalog(self, index: int) -> None:

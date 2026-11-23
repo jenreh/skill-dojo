@@ -4,12 +4,17 @@ A server is pinned before it is used: an npm or PyPI package to its exact
 version, an OCI image to the digest of its manifest. The pin is the item's
 upstream ``commit``. The wrapper plugin is generated from the pinned entry: a
 ``plugin.json`` and a ``.mcp.json`` with one server.
+
+A source whose repository is a git repo offers the one server of its
+``server.json``. There a remote server is pinned by the git commit too.
 """
 
 import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -36,6 +41,11 @@ OCI_RE = re.compile(
 )
 WILDCARD_RE = re.compile(r"(?:^|\.)[xX*](?:\.|$)")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+HEADER_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
+VARIABLE_RE = re.compile(r"(?<!\$)\{([A-Za-z_][A-Za-z0-9_]*)\}")
+SERVER_FILE = "server.json"
+# server.json remote type -> .mcp.json server type
+REMOTE_TYPES = {"streamable-http": "http", "sse": "sse"}
 NPM_REGISTRY = "https://registry.npmjs.org"
 PYPI_REGISTRY = "https://pypi.org"
 DOCKER_HUB = "docker.io"
@@ -87,6 +97,18 @@ class Transport(ApiModel):
     type: str
 
 
+class Header(ApiModel):
+    name: str
+    value: str | None = None
+    is_required: bool = Field(default=False, alias="isRequired")
+
+
+class Remote(ApiModel):
+    type: str
+    url: str
+    headers: list[Header] = Field(default_factory=list)
+
+
 class Package(ApiModel):
     registry_type: str = Field(alias="registryType")
     registry_base_url: str | None = Field(default=None, alias="registryBaseUrl")
@@ -111,7 +133,7 @@ class ServerEntry(ApiModel):
     website_url: str | None = Field(default=None, alias="websiteUrl")
     repository: dict[str, Any] | None = None
     packages: list[Package] = Field(default_factory=list)
-    remotes: list[dict[str, Any]] = Field(default_factory=list)
+    remotes: list[Remote] = Field(default_factory=list)
     status: str = "active"
 
 
@@ -214,7 +236,9 @@ def get_server(base_url: str, name: str) -> ServerEntry:
     return entry
 
 
-def offered(entry: ServerEntry, repository: str) -> UpstreamPlugin:
+def offered(
+    entry: ServerEntry, repository: str, *, remotes: bool = False
+) -> UpstreamPlugin:
     """``entry`` as a plugin a source offers (with why it cannot be pinned)."""
     return UpstreamPlugin(
         name=entry.name,
@@ -222,8 +246,35 @@ def offered(entry: ServerEntry, repository: str) -> UpstreamPlugin:
         repository=repository,
         version=entry.version,
         description=entry.description,
-        unsupported=unsupported(entry),
+        unsupported=unsupported(entry, remotes=remotes),
     )
+
+
+# --- server.json in a git repository -------------------------------------------------
+
+
+def is_repository(url: str) -> bool:
+    """A git repo holding a ``server.json`` (GitHub, ``.git``, local), not an API."""
+    parts = urlsplit(url)
+    if parts.scheme not in {"https", "http"}:
+        return True
+    host = (parts.hostname or "").removeprefix("www.")
+    return host == "github.com" or parts.path.endswith(".git")
+
+
+def read_server_file(root: Path) -> ServerEntry:
+    """The server described by ``server.json`` at the root of a checkout."""
+    path = root / SERVER_FILE
+    if path.is_symlink() or not path.is_file():
+        raise NotFoundError(f"no {SERVER_FILE} at the root of the repository")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        entry = ServerEntry.model_validate(data)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise InvalidInputError(f"unreadable {SERVER_FILE}: {exc}") from exc
+    if not SERVER_NAME_RE.match(entry.name) or ".." in entry.name:
+        raise InvalidInputError(f"'{entry.name}' is not an MCP server name")
+    return entry
 
 
 # --- pinning -------------------------------------------------------------------------
@@ -244,26 +295,48 @@ class Pinned:
         return f"{self.registry_type}:{self.reference}"
 
 
-def unsupported(entry: ServerEntry) -> str | None:
+def unsupported(entry: ServerEntry, *, remotes: bool = False) -> str | None:
     """Why ``entry`` cannot be pinned, or ``None``."""
     try:
-        choose_package(entry)
+        choose(entry, remotes=remotes)
     except InvalidInputError as exc:
         return str(exc)
     return None
 
 
-def choose_package(entry: ServerEntry) -> Package:
-    """The first stdio package we can pin (npm, PyPI, OCI)."""
+def choose(entry: ServerEntry, *, remotes: bool = False) -> Package | Remote:
+    """The first stdio package we can pin (npm, PyPI, OCI); with ``remotes``
+    (a pinned ``server.json``) else the first remote we can use."""
     reasons = []
-    for package in entry.packages:
-        reason = _package_problem(package)
+    candidates = [*entry.packages, *(entry.remotes if remotes else [])]
+    for candidate in candidates:
+        reason = (
+            _package_problem(candidate)
+            if isinstance(candidate, Package)
+            else _remote_problem(candidate)
+        )
         if reason is None:
-            return package
+            return candidate
         reasons.append(reason)
-    if not entry.packages:
+    if not entry.packages and not remotes:
         reasons.append("no package (remote-only servers cannot be pinned)")
+    elif not candidates:
+        reasons.append("no package and no remote")
     raise InvalidInputError(f"'{entry.name}': " + "; ".join(reasons))
+
+
+def _remote_problem(remote: Remote) -> str | None:
+    if remote.type not in REMOTE_TYPES:
+        return f"{remote.type} remotes are not supported"
+    parts = urlsplit(remote.url)
+    local = parts.scheme == "http" and parts.hostname in LOCAL_HOSTS
+    if (parts.scheme != "https" and not local) or not parts.hostname:
+        return f"remote '{remote.url}' is not an https URL"
+    if parts.username or parts.password:
+        return f"remote '{remote.url}' carries credentials"
+    if "{" in remote.url:
+        return f"remote '{remote.url}' needs URL variables"
+    return None
 
 
 def _package_problem(package: Package) -> str | None:  # noqa: PLR0911
@@ -446,8 +519,27 @@ def server_config(package: Package, pinned: Pinned) -> dict[str, Any]:
     return config
 
 
+def remote_config(remote: Remote) -> dict[str, Any]:
+    """The ``mcpServers`` entry of a remote; header ``{variables}`` and required
+    headers without a value become ``${VARIABLES}`` the user sets."""
+    config: dict[str, Any] = {"type": REMOTE_TYPES[remote.type], "url": remote.url}
+    headers = {}
+    for header in remote.headers:
+        if not HEADER_RE.match(header.name):
+            continue
+        value = header.value
+        if value is None:
+            if not header.is_required:
+                continue
+            value = _placeholder(header.name)
+        headers[header.name] = VARIABLE_RE.sub(lambda m: _placeholder(m[1]), value)
+    if headers:
+        config["headers"] = headers
+    return config
+
+
 def wrapper_files(
-    item_id: str, entry: ServerEntry, pinned: Pinned, package: Package
+    item_id: str, entry: ServerEntry, server: dict[str, Any]
 ) -> dict[str, str]:
     """``plugin.json`` and ``.mcp.json`` of the wrapper plugin."""
     manifest: dict[str, Any] = {
@@ -459,7 +551,7 @@ def wrapper_files(
     homepage = entry.website_url or (entry.repository or {}).get("url")
     if isinstance(homepage, str) and homepage.startswith("https://"):
         manifest["homepage"] = homepage
-    servers = {server_key(entry.name): server_config(package, pinned)}
+    servers = {server_key(entry.name): server}
     return {
         "plugin.json": jsontext.dump(manifest),
         ".mcp.json": jsontext.dump({"mcpServers": servers}),

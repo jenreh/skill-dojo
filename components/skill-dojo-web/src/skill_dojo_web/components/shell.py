@@ -1,4 +1,4 @@
-"""The app shell: header, navigation, notice. Wraps every page."""
+"""The app shell: header, navigation, toasts. Wraps every page."""
 
 from typing import Any
 
@@ -148,31 +148,18 @@ def navbar(active: str) -> rx.Component:
     )
 
 
-def notice() -> rx.Component:
-    return rx.cond(
-        AppState.notice != "",
-        mn.alert(
-            mn.group(
-                mn.text(AppState.notice, size="sm", flex="1"),
-                mn.close_button(aria_label="Dismiss", on_click=AppState.dismiss),
-                wrap="nowrap",
-            ),
-            color=rx.cond(AppState.notice_ok, "green", "red"),
-            variant="light",
-            role="status",
-        ),
-    )
-
-
 def shell(active: str, *content: Any) -> rx.Component:
     """The page frame: header, navigation and ``content`` in the main area."""
     return mn.theme_wrapper(
-        mn.app_shell(
-            mn.app_shell.header(header()),
-            mn.app_shell.navbar(navbar(active)),
-            mn.app_shell.main(mn.stack(notice(), *content, gap="md")),
-            header={"height": 52},
-            navbar={"width": 240, "breakpoint": "sm"},
-            padding="md",
+        rx.fragment(
+            mn.notifications_provider(position="top-right", limit=5),
+            mn.app_shell(
+                mn.app_shell.header(header()),
+                mn.app_shell.navbar(navbar(active)),
+                mn.app_shell.main(mn.stack(*content, gap="md")),
+                header={"height": 52},
+                navbar={"width": 240, "breakpoint": "sm"},
+                padding="md",
+            ),
         )
     )

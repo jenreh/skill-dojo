@@ -166,6 +166,11 @@ def test_source_mirror_parts_sync_flags_commands(
     assert "PR opened" in invoke("finish").output
     assert "PR #1 open" in invoke("status").output
     invoke("source", "add", "spare", ap.url)
+    retyped = invoke("source", "set-type", "spare", "git")
+    assert "'spare' is now git" in retyped.output, retyped.output
+    assert "'spare' is now agent_plugins_marketplace" in (
+        invoke("source", "set-type", "spare").output
+    )
     assert "Removed" in invoke("source", "remove", "spare").output
 
 

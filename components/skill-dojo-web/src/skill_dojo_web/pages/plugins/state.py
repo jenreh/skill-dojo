@@ -3,9 +3,10 @@
 from typing import Any
 
 import reflex as rx
+from reflex.event import EventSpec
 
 import skill_dojo_core as core
-from skill_dojo_web.state import AppState
+from skill_dojo_web.state import AppState, off_loop
 
 KIND = {"skill": "skill", "agent": "agent", "mcp_server": "mcp", "hook": "hook"}
 
@@ -57,15 +58,20 @@ class PluginsState(AppState):
         return f"plugins/{name}/"
 
     @rx.event
-    def load(self) -> None:
+    @off_loop
+    def load(self) -> list[EventSpec]:
+        return self._load()
+
+    def _load(self) -> list[EventSpec]:
         self.load_shell()
         try:
             found = core.plugins_overview(self._ctx())
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-            return
+            return self._flush()
         self.marketplace_version = found.marketplace_version or ""
         self.plugins = [_plugin(p) for p in found.plugins]
+        return self._flush()
 
     @rx.event
     def set_query(self, value: str) -> None:
@@ -84,7 +90,8 @@ class PluginsState(AppState):
         self.new_category = value
 
     @rx.event
-    def create(self) -> None:
+    @off_loop
+    def create(self) -> list[EventSpec]:
         name = self.new_name.strip()
         try:
             core.plugin_new(
@@ -97,23 +104,25 @@ class PluginsState(AppState):
             self.new_name, self.new_description, self.new_category = "", "", ""
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-        self.load()
+        return self._load()
 
     @rx.event
-    def scan(self) -> None:
+    @off_loop
+    def scan(self) -> list[EventSpec]:
         """``build``: lock new files, bump versions, regenerate metadata."""
         try:
             self.scanned = core.build(self._ctx()).changed
             self._say(f"Scan: {len(self.scanned)} file(s) updated")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-        self.load()
+        return self._load()
 
     @rx.event
-    def remove_part(self, plugin: str, part: str) -> None:
+    @off_loop
+    def remove_part(self, plugin: str, part: str) -> list[EventSpec]:
         try:
             core.remove_parts(self._ctx(), plugin, [part])
             self._say(f"Removed {part} from {plugin}")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-        self.load()
+        return self._load()

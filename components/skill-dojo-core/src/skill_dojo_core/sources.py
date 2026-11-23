@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from skill_dojo_core.errors import InvalidInputError, NotFoundError
-from skill_dojo_core.layout import read_manifest, skill_roots
+from skill_dojo_core.layout import find_skills, read_manifest
 from skill_dojo_core.models import Source, SourceType
 from skill_dojo_core.results import Result
 
@@ -260,29 +260,17 @@ def describe(plugin: UpstreamPlugin, root: Path) -> UpstreamPlugin:
     license_ = manifest.get("license")
     return plugin.model_copy(
         update={
-            "contents": contents_summary(paths, servers, skill_roots(manifest)),
+            "contents": contents_summary(paths, servers, manifest),
             "license": license_ if isinstance(license_, str) else None,
         }
     )
 
 
 def contents_summary(
-    paths: list[str], mcp_servers: int = 0, roots: list[str] | None = None
+    paths: list[str], mcp_servers: int = 0, manifest: dict[str, Any] | None = None
 ) -> str:
-    """``3 skills · 1 MCP · 1 hook`` of a plugin's file list.
-
-    A skill is ``<root>/SKILL.md`` or ``<root>/<name>/SKILL.md`` for each root.
-    """
-    wanted = set(roots or ["skills"])
-    skills = {
-        skill.as_posix()
-        for p in paths
-        if (skill := PurePosixPath(p)).name == "SKILL.md"
-        and (
-            skill.parent.as_posix() in wanted
-            or skill.parent.parent.as_posix() in wanted
-        )
-    }
+    """``3 skills · 1 MCP · 1 hook`` of a plugin's file list."""
+    skills = find_skills(paths, manifest)
     agents = [p for p in paths if p.startswith("agents/") and p.endswith(".md")]
     hooks = 1 if any(PurePosixPath(p).name == "hooks.json" for p in paths) else 0
     parts = [

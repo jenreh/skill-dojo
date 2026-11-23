@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from skill_dojo_core import builder, frontmatter, git, hashing, jsontext
+from skill_dojo_core import builder, frontmatter, git, hashing, jsontext, layout
 from skill_dojo_core.branches import check_clean_folder
 from skill_dojo_core.cache import PartRef
 from skill_dojo_core.context import Context
@@ -165,13 +165,7 @@ def _ref(kind: str, name: str, path: Path | None) -> PartRef:
 
 def index_parts(files: dict[str, Path]) -> list[PartRef]:
     """Every part a plugin offers, for the cache and the Sources page."""
-    skills = sorted(
-        {
-            r.split("/")[1]
-            for r in files
-            if r.startswith("skills/") and r.endswith("/SKILL.md") and r.count("/") == 2
-        }
-    )
+    skills = layout.find_skills(files, layout.files_manifest(files))
     agents = sorted(
         PurePosixPath(r).stem
         for r in files
@@ -183,7 +177,10 @@ def index_parts(files: dict[str, Path]) -> list[PartRef]:
     except InvalidInputError:
         servers, events = [], []
     return [
-        *(_ref("skill", n, files.get(f"skills/{n}/SKILL.md")) for n in skills),
+        *(
+            _ref("skill", n, files.get(f"{folder}/SKILL.md"))
+            for n, folder in sorted(skills.items())
+        ),
         *(_ref("agent", n, files.get(f"agents/{n}.md")) for n in agents),
         *(PartRef(kind="mcp_server", name=n) for n in servers),
         *(PartRef(kind="hook", name=n) for n in events),
@@ -259,11 +256,15 @@ def pick(spec: PartSpec, files: dict[str, Path], upstream: Upstream) -> Picked:
     }
     hook = None
     if spec.kind == "skill":
-        prefix = f"skills/{spec.name}/"
-        chosen = {r: p for r, p in files.items() if r.startswith(prefix)}
-        if f"{prefix}SKILL.md" not in chosen:
+        folder = layout.find_skills(files, layout.files_manifest(files)).get(spec.name)
+        if folder is None:
             raise NotFoundError(f"{spec.plugin} has no skill '{spec.name}'")
-        path = f"{base}/skills/{spec.name}"
+        chosen = {
+            f"skills/{spec.name}/{r.removeprefix(f'{folder}/')}": p
+            for r, p in files.items()
+            if r.startswith(f"{folder}/")
+        }
+        path = f"{base}/{folder}"
     elif spec.kind == "agent":
         rel = f"agents/{spec.name}.md"
         if rel not in files:

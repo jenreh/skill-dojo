@@ -1,12 +1,14 @@
 """Changes: the work branch, its changed plugins with versions, finish & PR."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 
 import reflex as rx
+from reflex.event import EventSpec
 
 import skill_dojo_core as core
-from skill_dojo_web.state import AppState
+from skill_dojo_web.state import AppState, off_loop
 
 CUSTOM = "custom"
 LEVEL_OPTIONS = [
@@ -94,18 +96,23 @@ class ChangesState(AppState):
         return found
 
     @rx.event
-    def load(self) -> None:
+    @off_loop
+    def load(self) -> list[EventSpec]:
+        return self._load()
+
+    def _load(self) -> list[EventSpec]:
         self.load_shell()
         try:
             result = core.changes_overview(self._ctx()).model_dump(mode="json")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-            return
+            return self._flush()
         self.status = result["status"]
         self.pending = list(result["status"]["pending"])
         self.flags = flag_rows(result["flags"])
         known = {p["item"] for p in self.pending if p["editable"]}
         self.chosen = {k: v for k, v in self.chosen.items() if k in known}
+        return self._flush()
 
     @rx.event
     def choose(self, item: str, level: str) -> None:
@@ -116,7 +123,7 @@ class ChangesState(AppState):
         self.custom = {**self.custom, item: value}
 
     @rx.event(background=True)
-    async def finish(self) -> None:
+    async def finish(self) -> AsyncIterator[list[EventSpec]]:
         """``finish`` in a worker thread; progress lines reach the header."""
         async with self:
             if self.busy:
@@ -148,4 +155,5 @@ class ChangesState(AppState):
         finally:
             async with self:
                 self.busy, self.progress = False, ""
-                self.load()
+                toasts = await asyncio.to_thread(self._load)
+        yield toasts

@@ -58,6 +58,7 @@ from skill_dojo_core.commands.sources import (
     source_list,
     source_refresh,
     source_remove,
+    source_set_type,
 )
 from skill_dojo_core.commands.sync import SyncResult, sync
 from skill_dojo_core.commands.versions import (
@@ -192,6 +193,7 @@ __all__ = [
     "source_list",
     "source_refresh",
     "source_remove",
+    "source_set_type",
     "status",
     "sync",
     "tool_pin",

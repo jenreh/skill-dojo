@@ -12,7 +12,7 @@ from skill_dojo_web.components.common import (
     work,
     working,
 )
-from skill_dojo_web.pages.sources.state import KINDS
+from skill_dojo_web.pages.sources.state import DETECT, KINDS, TYPE_LABEL
 from skill_dojo_web.pages.sources.state import SourcesState as S
 
 
@@ -180,6 +180,39 @@ def _rows(p: rx.Var) -> rx.Component:
     return rx.fragment(_row(p), rx.cond(S.expanded == p["name"].to(str), _parts(p)))
 
 
+def _source_actions(src: rx.Var) -> rx.Component:
+    """Type select, refresh and remove for the selected source."""
+    return mn.group(
+        mn.select(
+            data=[
+                {"value": DETECT, "label": "detect again"},
+                *({"value": k, "label": v} for k, v in TYPE_LABEL.items()),
+            ],
+            value=src["kind"].to(str),
+            on_change=lambda v: work("set_type", S.set_type(v)),
+            allow_deselect=False,
+            disabled=working("set_type"),
+            aria_label="Source type",
+            w=170,
+        ),
+        mn.button(
+            "Refresh catalog",
+            left_section=rx.icon("refresh-cw", size=14),
+            variant="default",
+            loading=working("refresh"),
+            on_click=work("refresh", S.refresh),
+        ),
+        mn.button(
+            "Remove",
+            left_section=rx.icon("trash-2", size=14),
+            variant="default",
+            color="red",
+            on_click=S.ask_remove,
+        ),
+        gap="xs",
+    )
+
+
 def catalog() -> rx.Component:
     """Header, filter and bars stay put; the plugin rows scroll within the window."""
     src = S.source
@@ -209,13 +242,7 @@ def catalog() -> rx.Component:
                 ),
                 gap=4,
             ),
-            mn.button(
-                "Refresh catalog",
-                left_section=rx.icon("refresh-cw", size=14),
-                variant="default",
-                loading=working("refresh"),
-                on_click=work("refresh", S.refresh),
-            ),
+            _source_actions(src),
             justify="space-between",
             align="flex-start",
         ),
@@ -264,6 +291,7 @@ def catalog() -> rx.Component:
             style={"flexDirection": "column"},
         ),
         _dialog(),
+        _remove_dialog(),
         gap="md",
         h=WINDOW_HEIGHT,
     )
@@ -299,5 +327,33 @@ def _dialog() -> rx.Component:
         title="New plugin",
         opened=S.dialog,
         on_close=S.close_dialog,
+        centered=True,
+    )
+
+
+def _remove_dialog() -> rx.Component:
+    return mn.modal(
+        mn.stack(
+            mn.text(
+                f"Removes {S.selected} from registry/sources.yaml on the work branch "
+                "and drops its cached catalog. Plugins that still use it block this.",
+                size="sm",
+                c="dimmed",
+            ),
+            mn.group(
+                mn.button("Cancel", variant="default", on_click=S.close_remove),
+                mn.button(
+                    "Remove source",
+                    color="red",
+                    loading=working("remove_source"),
+                    on_click=work("remove_source", S.remove_source),
+                ),
+                justify="flex-end",
+            ),
+            gap="sm",
+        ),
+        title="Remove source",
+        opened=S.removing,
+        on_close=S.close_remove,
         centered=True,
     )

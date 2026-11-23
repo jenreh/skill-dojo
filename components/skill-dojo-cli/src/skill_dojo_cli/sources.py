@@ -69,6 +69,20 @@ def source_refresh(
     typer.echo(f"Refreshed {source_id or 'all sources'}.")
 
 
+@source_app.command("set-type")
+def source_set_type(
+    source_id: str,
+    kind: Annotated[
+        SourceType | None,
+        typer.Argument(help="The new type (default: detect it from the upstream)."),
+    ] = None,
+) -> None:
+    """Change a source's type and cache its catalog again."""
+    result = core.source_set_type(build_context(Path.cwd()), source_id, kind)
+    found = next(s for s in result.sources if s.id == source_id)
+    typer.echo(f"Source '{source_id}' is now {found.type.value}.")
+
+
 @source_app.command("allow")
 def source_allow(source_id: str, plugin: str) -> None:
     """Add a plugin to a source's allowlist."""

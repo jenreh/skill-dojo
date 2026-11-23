@@ -5,6 +5,8 @@ Git is real; GitHub is the shared fake. Event handlers are called through
 """
 
 import asyncio
+import inspect
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +24,14 @@ from skill_dojo_web.pages.plugins.state import PluginsState
 from skill_dojo_web.pages.preview.state import PreviewState
 from skill_dojo_web.pages.releases.state import ReleasesState
 from skill_dojo_web.pages.revoke.state import RevokeState
-from skill_dojo_web.pages.sources.state import NEW, SourcesState
-from skill_dojo_web.state import failure
+from skill_dojo_web.pages.sources.state import DETECT, NEW, SourcesState
+from skill_dojo_web.state import (
+    FAILURE_TOAST_MS,
+    TOAST_MS,
+    AppState,
+    failure,
+    off_loop,
+)
 from tests.support.fake_github import FakeGitHub
 from tests.support.fixture_repos import FixtureRepo
 
@@ -35,7 +43,28 @@ def state(cls: type[Any]) -> Any:
 
 
 def call(st: Any, name: str, *args: Any) -> Any:
-    return getattr(type(st), name).fn(st, *args)
+    result = getattr(type(st), name).fn(st, *args)
+    return asyncio.run(result) if inspect.iscoroutine(result) else result
+
+
+def scripts(events: list[Any]) -> list[str]:
+    """The JavaScript each ``call_script`` event runs."""
+    return [e.args[0][1]._var_value for e in events]
+
+
+def test_toasts_close_by_themselves_and_have_a_close_button() -> None:
+    st = state(AppState)
+    st._say("done")
+    st._fail(NotFoundError("missing"))
+    ok, bad = scripts(st._flush())
+    assert '"message": "done"' in ok
+    assert '"color": "teal"' in ok
+    assert f'"autoClose": {TOAST_MS}' in ok
+    assert '"withCloseButton": true' in ok
+    assert '"color": "red"' in bad
+    assert f'"autoClose": {FAILURE_TOAST_MS}' in bad
+    assert '"withCloseButton": true' in bad
+    assert st._flush() == []
 
 
 @pytest.fixture
@@ -103,7 +132,8 @@ def test_sources_state_browse_mirror_and_parts(
     assert any(p["name"] == "hello" for p in st.plugins)
     call(st, "set_query", "hel")
     assert [p["name"] for p in st.shown] == ["hello"]
-    call(st, "mirror", "hello")
+    [shown] = scripts(call(st, "mirror", "hello"))
+    assert "hello: added" in shown
     assert "hello: added" in st.notice
     spec = "ap:hello/skill/greet"
     call(st, "expand", "hello")
@@ -139,7 +169,8 @@ def test_sources_state_browse_mirror_and_parts(
     assert not st.cached
     call(st, "set_new_id", "bad")
     call(st, "set_new_repo", "not a repo")
-    call(st, "add_source")
+    [shown] = scripts(call(st, "add_source"))
+    assert '"color": "red"' in shown
     assert st.notice_ok is False
     assert not fake_github.pulls
 
@@ -152,6 +183,29 @@ def test_sources_state_versions(ui: Context) -> None:
     assert st.version == "3.1.0"
     call(st, "expand", "tools")
     assert [r["version"] for r in st.part_list] == ["1.4.0"]
+
+
+def test_sources_state_type_and_remove(ui: Context) -> None:
+    st = state(SourcesState)
+    call(st, "load")
+    assert st.source["kind"] == "agent_plugins_marketplace"
+    call(st, "set_type", "git")
+    assert st.notice_ok, st.notice
+    assert (st.source["kind"], st.source["type"]) == ("git", "git")
+    call(st, "set_type", DETECT)
+    assert st.source["kind"] == "agent_plugins_marketplace"
+    call(st, "ask_remove")
+    assert st.removing
+    call(st, "close_remove")
+    assert not st.removing
+    call(st, "remove_source")
+    assert "Removed source 'ap'" in st.notice
+    assert [s["id"] for s in st.sources] == ["cl"]
+    assert st.selected == "cl"
+    mirror(ui, "cl", "tools")
+    call(st, "remove_source")
+    assert st.notice_ok is False
+    assert "used by tools" in st.notice
 
 
 def test_plugins_state_new_plugin_and_scan(ui: Context) -> None:
@@ -238,6 +292,25 @@ def test_work_marks_the_clicked_control_busy() -> None:
     assert action is SourcesState.refresh
     assert end.fn.__name__ == "end_work"
     assert isinstance(working("refresh"), rx.Var)
+
+
+def test_off_loop_runs_core_calls_in_a_worker_thread() -> None:
+    seen: list[bool] = []
+
+    @off_loop
+    def handler(_st: object, value: int) -> int:
+        seen.append(threading.current_thread() is threading.main_thread())
+        return value * 2
+
+    assert inspect.iscoroutinefunction(handler)
+    assert asyncio.run(handler(None, 21)) == 42
+    assert seen == [False]
+    assert inspect.iscoroutinefunction(SourcesState.create_plugin.fn)
+    assert list(inspect.signature(SourcesState.toggle_part.fn).parameters) == [
+        "self",
+        "spec",
+        "on",
+    ]
 
 
 def test_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

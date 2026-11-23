@@ -12,6 +12,7 @@ from skill_dojo_core import (
     Context,
     InvalidInputError,
     NotFoundError,
+    SkillDojoError,
     SourceType,
     ToolPin,
     browse,
@@ -22,6 +23,7 @@ from skill_dojo_core import (
     source_add,
     source_list,
     source_remove,
+    source_set_type,
     sync,
     validate,
     vendoring,
@@ -70,6 +72,25 @@ def test_sources_and_browse(admin: Context, fixture_repos: FixtureRepos) -> None
     assert not (admin.repo / ".skill-dojo/cache/sources/plain").exists()
     with pytest.raises(NotFoundError):
         browse(admin, "plain")
+
+
+def test_source_set_type(admin: Context, fixture_repos: FixtureRepos) -> None:
+    claude = fixture_repos.claude_marketplace()
+    source_add(admin, "cl", claude.url, kind=SourceType.GIT)
+    assert browse(admin, "cl").version is None
+    source_set_type(admin, "cl", SourceType.CLAUDE_MARKETPLACE)
+    [source] = source_list(admin).sources
+    assert source.type is SourceType.CLAUDE_MARKETPLACE
+    found = browse(admin, "cl")
+    assert (found.cached, found.version) == (True, "3.1.0")
+    source_set_type(admin, "cl", SourceType.GIT)
+    source_set_type(admin, "cl", None)
+    assert source_list(admin).sources[0].type is SourceType.CLAUDE_MARKETPLACE
+    with pytest.raises(SkillDojoError):
+        source_set_type(admin, "cl", SourceType.MCP_REGISTRY)
+    assert source_list(admin).sources[0].type is SourceType.CLAUDE_MARKETPLACE
+    with pytest.raises(NotFoundError):
+        source_set_type(admin, "none", SourceType.GIT)
 
 
 def test_mirror_claude_plugin_adds_agent_plugins_manifest(

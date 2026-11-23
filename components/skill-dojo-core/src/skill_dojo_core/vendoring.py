@@ -116,19 +116,42 @@ def checkout_source(ctx: Context, source: Source) -> tuple[Path, str]:
     return cache.source_checkout(ctx.repo, source, url, commit), commit
 
 
-def fetch_server(source: Source, name: str, item_id: str, tmp: Path) -> Fetched:
-    """Pin the latest version of MCP server ``name`` and write its wrapper."""
-    entry = mcp_registry.get_server(source.repository, name)
-    package = mcp_registry.choose_package(entry)
-    pinned = mcp_registry.pin(package)
+def server_entry(
+    ctx: Context, source: Source
+) -> tuple[list[mcp_registry.ServerEntry], str]:
+    """The ``server.json`` of a git repo source and the commit it was read at."""
+    root, commit = checkout_source(ctx, source)
+    return [mcp_registry.read_server_file(root)], commit
+
+
+def fetch_server(
+    ctx: Context, source: Source, name: str, item_id: str, tmp: Path
+) -> Fetched:
+    """Pin the latest version of MCP server ``name`` and write its wrapper.
+
+    A package is pinned to its version or digest; a remote of a ``server.json``
+    in a git repo to the commit it was read at.
+    """
+    in_repo = mcp_registry.is_repository(source.repository)
+    if in_repo:
+        entries, commit = server_entry(ctx, source)
+        entry = next((e for e in entries if e.name == name), None)
+        if entry is None:
+            raise NotFoundError(f"source '{source.id}' offers no server '{name}'")
+    else:
+        entry, commit = mcp_registry.get_server(source.repository, name), ""
+    chosen = mcp_registry.choose(entry, remotes=in_repo)
+    if isinstance(chosen, mcp_registry.Package):
+        pinned = mcp_registry.pin(chosen)
+        server, pin = mcp_registry.server_config(chosen, pinned), pinned.pin
+    else:
+        server, pin = mcp_registry.remote_config(chosen), commit
     root = tmp / "mcp"
-    for rel, text in mcp_registry.wrapper_files(
-        item_id, entry, pinned, package
-    ).items():
+    for rel, text in mcp_registry.wrapper_files(item_id, entry, server).items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text(text, encoding="utf-8")
-    plugin = mcp_registry.offered(entry, source.repository)
-    return Fetched(root, plugin, source.repository, entry.version, pinned.pin)
+    plugin = mcp_registry.offered(entry, source.repository, remotes=in_repo)
+    return Fetched(root, plugin, source.repository, entry.version, pin)
 
 
 def fetch_plugin(
@@ -143,7 +166,7 @@ def fetch_plugin(
         raise InvalidInputError(f"'{name}' is not in the allowlist of '{source.id}'")
     if source.type is SourceType.MCP_REGISTRY:
         return fetch_server(
-            source, name, item_id or mcp_registry.default_item_id(name), tmp
+            ctx, source, name, item_id or mcp_registry.default_item_id(name), tmp
         )
     root, commit = checkout_source(ctx, source)
     offered = {p.name: p for p in sources.list_plugins(source, root)}

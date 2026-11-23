@@ -3,10 +3,11 @@
 from typing import Any
 
 import reflex as rx
+from reflex.event import EventSpec
 
 import skill_dojo_core as core
 from skill_dojo_core import SourceType
-from skill_dojo_web.state import AppState
+from skill_dojo_web.state import AppState, off_loop
 
 DETECT = "detect"
 NEW = "__new__"
@@ -47,6 +48,7 @@ class SourcesState(AppState):
     pending: str = ""
     dialog: bool = False
     target_name: str = ""
+    removing: bool = False
 
     @rx.var
     def target_options(self) -> list[dict[str, str]]:
@@ -91,16 +93,21 @@ class SourcesState(AppState):
         ]
 
     @rx.event
-    def load(self) -> None:
+    @off_loop
+    def load(self) -> list[EventSpec]:
+        return self._load()
+
+    def _load(self) -> list[EventSpec]:
         self.load_shell()
         try:
             listed = core.source_list(self._ctx()).sources
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-            return
+            return self._flush()
         self.sources = [
             {
                 "id": s.id,
+                "kind": s.type.value,
                 "type": TYPE_LABEL[s.type.value],
                 "repository": s.repository,
                 "url": core.web_url(s.repository),
@@ -115,6 +122,7 @@ class SourcesState(AppState):
         ids = [s["id"] for s in self.sources]
         if ids:
             self._browse(self.selected if self.selected in ids else ids[0])
+        return self._flush()
 
     def _browse(self, source_id: str, refresh: bool = False) -> None:
         if source_id != self.selected:
@@ -145,24 +153,29 @@ class SourcesState(AppState):
         ]
 
     @rx.event
-    def select(self, source_id: str) -> None:
+    @off_loop
+    def select(self, source_id: str) -> list[EventSpec]:
         self._browse(source_id)
+        return self._flush()
 
     @rx.event
-    def refresh(self) -> None:
+    @off_loop
+    def refresh(self) -> list[EventSpec]:
         self._browse(self.selected, refresh=True)
+        return self._flush()
 
     @rx.event
-    def expand(self, plugin: str) -> None:
+    @off_loop
+    def expand(self, plugin: str) -> list[EventSpec]:
         """Show (or hide) the skills, agents, MCP servers and hooks of a plugin."""
         if self.expanded == plugin:
             self.expanded, self.part_rows = "", []
-            return
+            return []
         try:
             found = core.plugin_parts(self._ctx(), self.selected, plugin).parts
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-            return
+            return self._flush()
         self.expanded = plugin
         self.part_rows = [
             {
@@ -175,6 +188,7 @@ class SourcesState(AppState):
             for p in found
         ]
         self._load_owners()
+        return self._flush()
 
     def _load_owners(self) -> None:
         """Which local plugin holds each part (by ``source:plugin/kind/name``)."""
@@ -200,11 +214,12 @@ class SourcesState(AppState):
         self.targets = {**self.targets, spec: value or NEW}
 
     @rx.event
-    def toggle_part(self, spec: str, on: bool) -> None:
+    @off_loop
+    def toggle_part(self, spec: str, on: bool) -> list[EventSpec]:
         """On: add the part to its selected plugin (or a new one); off: remove it."""
         owner = self.owners.get(spec)
         if on == bool(owner):
-            return
+            return []
         part = "/".join(spec.rsplit("/", 2)[1:])
         if owner:
             try:
@@ -214,17 +229,18 @@ class SourcesState(AppState):
             except Exception as exc:  # noqa: BLE001 (shown in the UI)
                 self._fail(exc)
             self._changed()
-            return
+            return self._flush()
         target = next(r["target"] for r in self.part_list if r["spec"] == spec)
         if target == NEW:
             self.pending, self.dialog = spec, True
-            return
+            return []
         try:
             core.add_parts(self._ctx(), target, [spec])
             self._say(f"Added {part} to {target}")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
         self._changed()
+        return self._flush()
 
     @rx.event
     def close_dialog(self) -> None:
@@ -235,7 +251,8 @@ class SourcesState(AppState):
         self.target_name = value
 
     @rx.event
-    def create_plugin(self) -> None:
+    @off_loop
+    def create_plugin(self) -> list[EventSpec]:
         """Create the named plugin with the part whose switch was turned on."""
         name = self.target_name.strip()
         try:
@@ -247,6 +264,7 @@ class SourcesState(AppState):
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
         self._changed()
+        return self._flush()
 
     @rx.event
     def set_query(self, value: str) -> None:
@@ -273,7 +291,8 @@ class SourcesState(AppState):
         self.new_type = value
 
     @rx.event
-    def add_source(self) -> None:
+    @off_loop
+    def add_source(self) -> list[EventSpec]:
         try:
             core.source_add(
                 self._ctx(),
@@ -290,21 +309,58 @@ class SourcesState(AppState):
             )
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-        self.load()
+        return self._load()
 
     @rx.event
-    def mirror(self, plugin: str) -> None:
+    @off_loop
+    def set_type(self, value: str) -> list[EventSpec]:
+        """Change the selected source's type (``detect``: read it again)."""
+        kind = None if value == DETECT else SourceType(value)
+        try:
+            result = core.source_set_type(self._ctx(), self.selected, kind)
+            found = next(s for s in result.sources if s.id == self.selected)
+            self._say(f"'{self.selected}' is now {TYPE_LABEL[found.type.value]}")
+        except Exception as exc:  # noqa: BLE001 (shown in the UI)
+            self._fail(exc)
+        return self._load()
+
+    @rx.event
+    def ask_remove(self) -> None:
+        self.removing = True
+
+    @rx.event
+    def close_remove(self) -> None:
+        self.removing = False
+
+    @rx.event
+    @off_loop
+    def remove_source(self) -> list[EventSpec]:
+        """Remove the selected source (refused while a plugin still uses it)."""
+        self.removing = False
+        try:
+            core.source_remove(self._ctx(), self.selected)
+            self._say(f"Removed source '{self.selected}'")
+            self.selected = ""
+        except Exception as exc:  # noqa: BLE001 (shown in the UI)
+            self._fail(exc)
+        return self._load()
+
+    @rx.event
+    @off_loop
+    def mirror(self, plugin: str) -> list[EventSpec]:
         try:
             result = core.mirror(self._ctx(), self.selected, plugin)
             self._say(f"{result.item}: {result.status} on the work branch")
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
         self._browse(self.selected)
+        return self._flush()
 
     @rx.event
-    def allow(self, plugin: str) -> None:
+    @off_loop
+    def allow(self, plugin: str) -> list[EventSpec]:
         try:
             core.source_allow(self._ctx(), self.selected, plugin)
         except Exception as exc:  # noqa: BLE001 (shown in the UI)
             self._fail(exc)
-        self.load()
+        return self._load()
