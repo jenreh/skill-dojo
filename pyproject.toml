@@ -22,6 +22,7 @@ dev = [
     "pytest-httpserver>=1.2.1",
     "ruff>=0.17.5",
     "ty>=0.0.104",
+    "pypress-toolkit>=1.0.1",
 ]
 
 [tool.uv]
